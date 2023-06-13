@@ -296,7 +296,9 @@ def test_slurm_protected_mode(
     )
     pending_job_id = _test_active_job_running(scheduler_commands, remote_command_executor, clustermgtd_conf_path)
     _test_protected_mode(scheduler_commands, remote_command_executor, cluster)
+    # Call functions in other file
     test_cluster_health_metric(["NoCorrespondingInstanceErrors", "OnNodeStartRunErrors"], cluster.cfn_name, region)
+    # Highlight
     _test_job_run_in_working_queue(scheduler_commands)
     _test_recover_from_protected_mode(pending_job_id, pcluster_config_reader, bucket_name, cluster, scheduler_commands)
 
@@ -1805,7 +1807,7 @@ def _test_compute_fleet_status(command_executor, expected_status):
 
 
 @retry(wait_fixed=seconds(10), stop_max_delay=minutes(5))
-def _test_cluster_creation_failure(cluster, failure_code="HeadNodeBootstrapFailure"):
+def _test_cluster_creation_failure(cluster, failure_code="StaticNodeBootstrapFailure"):
     """Retry describe-cluster until we see {failure_code}."""
     response = cluster.describe_cluster()
     assert_that(response["failures"][0]["failureCode"]).is_equal_to(failure_code)
