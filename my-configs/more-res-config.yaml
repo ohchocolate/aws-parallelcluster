@@ -1,0 +1,35 @@
+Image:
+  Os: alinux2
+HeadNode:
+  InstanceType: t2.micro
+  Ssh:
+    KeyName: xiaoyaoe_east2
+  Networking:
+    SubnetId: subnet-00fc97de5254abdeb
+  Iam:
+    AdditionalIamPolicies:
+      - Policy: arn:aws:iam::aws:policy/AmazonSSMFullAccess
+    S3Access:
+      - BucketName: aps.week3
+        EnableWriteAccess: true
+  Imds:
+    Secured: true
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: queue
+      ComputeResources:
+        - Name: compute
+          MinCount: 0
+          MaxCount: 20
+          InstanceType: t2.micro
+      Networking:
+        SubnetIds:
+          - subnet-01297f3da27527e68
+      Iam:
+        S3Access:
+          - BucketName: aps.week3
+            EnableWriteAccess: true
+DevSettings:
+  AmiSearchFilters:
+    Owner: '447714826191'

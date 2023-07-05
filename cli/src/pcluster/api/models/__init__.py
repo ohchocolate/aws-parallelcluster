@@ -82,3 +82,4 @@ from pcluster.api.models.update_compute_fleet_request_content import UpdateCompu
 from pcluster.api.models.update_compute_fleet_response_content import UpdateComputeFleetResponseContent
 from pcluster.api.models.update_error import UpdateError
 from pcluster.api.models.validation_level import ValidationLevel
+from pcluster.api.models.detail import Detail

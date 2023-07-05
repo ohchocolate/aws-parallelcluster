@@ -1,0 +1,46 @@
+2023-06-15 12:59:04,284 - ERROR - 14438 - conftest - Exception raised while executing test_monitoring.py: 'NoneType' object is not iterable
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/runner.py", line 341, in from_call
+    result: Optional[TResult] = func()
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/runner.py", line 372, in <lambda>
+    call = CallInfo.from_call(lambda: list(collector.collect()), "collect")
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/python.py", line 534, in collect
+    return super().collect()
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/python.py", line 455, in collect
+    res = ihook.pytest_pycollect_makeitem(
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_hooks.py", line 265, in __call__
+    return self._hookexec(self.name, self.get_hookimpls(), kwargs, firstresult)
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_manager.py", line 80, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_callers.py", line 60, in _multicall
+    return outcome.get_result()
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_result.py", line 60, in get_result
+    raise ex[1].with_traceback(ex[2])
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_callers.py", line 39, in _multicall
+    res = hook_impl.function(*args)
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/python.py", line 271, in pytest_pycollect_makeitem
+    return list(collector._genfunctions(name, obj))
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/python.py", line 498, in _genfunctions
+    self.ihook.pytest_generate_tests.call_extra(methods, dict(metafunc=metafunc))
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_hooks.py", line 292, in call_extra
+    return self(**kwargs)
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_hooks.py", line 265, in __call__
+    return self._hookexec(self.name, self.get_hookimpls(), kwargs, firstresult)
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_manager.py", line 80, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_callers.py", line 60, in _multicall
+    return outcome.get_result()
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_result.py", line 60, in get_result
+    raise ex[1].with_traceback(ex[2])
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/pluggy/_callers.py", line 39, in _multicall
+    res = hook_impl.function(*args)
+  File "/Volumes/workplace/parallelcluster-jb/aws-parallelcluster/tests/integration-tests/conftest.py", line 190, in pytest_generate_tests
+    _parametrize_from_option(metafunc, "region", "regions")
+  File "/Volumes/workplace/parallelcluster-jb/aws-parallelcluster/tests/integration-tests/conftest.py", line 346, in _parametrize_from_option
+    metafunc.parametrize(test_arg_name, metafunc.config.getoption(option_name), scope="class")
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/python.py", line 1310, in parametrize
+    argnames, parametersets = ParameterSet._for_parametrize(
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/mark/structures.py", line 159, in _for_parametrize
+    parameters = cls._parse_parametrize_parameters(argvalues, force_tuple)
+  File "/Users/xiaoyaoe/apc-ve/lib/python3.9/site-packages/_pytest/mark/structures.py", line 145, in _parse_parametrize_parameters
+    return [
+

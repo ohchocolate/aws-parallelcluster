@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass
 from typing import List
 
+import boto3
+
 from pcluster.aws.aws_api import AWSApi
 from pcluster.aws.aws_resources import InstanceInfo, StackInfo
 from pcluster.constants import CW_LOGS_CFN_PARAM_NAME, OS_MAPPING, PCLUSTER_NODE_TYPE_TAG, PCLUSTER_VERSION_TAG
@@ -183,6 +185,35 @@ class ClusterStack(StackInfo):
             )
         return failure.failure_code, failure.api_failure_reason
 
+    def _get_alarm_names(self):
+        stack_events = list(itertools.chain.from_iterable(get_all_stack_events(self.name)))
+        alarm_names = []
+        # loop through events to get
+        for event in stack_events:
+            if event.get("ResourceType") == "AWS::CloudWatch::Alarm":
+                alarm_names.append(event['PhysicalResourceId'])
+        return alarm_names
+
+    def get_alarms_in_alarm(self):
+        cw = boto3.client("cloudwatch", region_name="us-east-2")
+        alarm_names = self._get_alarm_names()
+        alarms_in_alarm = []
+        for name in alarm_names:
+            # Get the details of the alarm
+            # all alarm names
+            response = cw.describe_alarms(AlarmNames=[name])
+
+            # If the alarm is in 'ALARM' state, add it to the list
+            for alarm in response['MetricAlarms']:
+                if alarm['StateValue'] == 'ALARM':
+                    alarms_in_alarm.append(alarm)
+                # there is no alarm
+                #
+        return alarms_in_alarm
+
+    # def get alarms
+    # BOTO3 describe-stack-resources
+
 
 class ClusterInstance(InstanceInfo):
     """Object to store cluster Instance info, initialized with a describe_instances call and other cluster info."""
@@ -271,12 +302,12 @@ class ExportClusterLogsFiltersParser(ClusterLogsFiltersParser):
     """Class to manage export cluster logs filters."""
 
     def __init__(
-        self,
-        head_node: ClusterInstance,
-        log_group_name: str,
-        start_time: datetime.datetime = None,
-        end_time: datetime.datetime = None,
-        filters: List[str] = None,
+            self,
+            head_node: ClusterInstance,
+            log_group_name: str,
+            start_time: datetime.datetime = None,
+            end_time: datetime.datetime = None,
+            filters: List[str] = None,
     ):
         super().__init__(head_node, filters)
         self.time_parser = LogGroupTimeFiltersParser(log_group_name, start_time, end_time)

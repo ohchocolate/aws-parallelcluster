@@ -301,6 +301,13 @@ paths:
           description: AWS Region that the operation corresponds to.
           type: string
         style: form
+      - explode: true
+        in: query
+        name: verbose
+        required: false
+        schema:
+          type: boolean
+        style: form
       responses:
         "200":
           content:
@@ -2368,6 +2375,11 @@ components:
         failureReason: failureReason
         cloudformationStackArn: cloudformationStackArn
         lastUpdatedTime: 2000-01-23T04:56:07.000+00:00
+        details:
+          - alarmType: alarmType
+            alarmState: alarmState
+          - alarmType: alarmType
+            alarmState: alarmState
         region: region
         clusterStatus: null
         headNode:
@@ -2428,6 +2440,13 @@ components:
             \ UPDATE_FAILED or DELETE_FAILED status."
           title: failureReason
           type: string
+        details:
+          description: "Detailed information about the cluster, provided only when\
+            \ the 'verbose' flag is set to true."
+          items:
+            $ref: '#/components/schemas/Detail'
+          title: details
+          type: array
       required:
       - cloudFormationStackStatus
       - cloudformationStackArn

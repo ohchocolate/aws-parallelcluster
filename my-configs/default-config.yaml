@@ -1,0 +1,40 @@
+Image:
+  CustomAmi: ami-0b20d1674b39e4f7f
+  Os: alinux2
+DevSettings:
+  Cookbook:
+    ChefCookbook: s3://aps.week3/parallelcluster/3.7.0/cookbooks/aws-parallelcluster-cookbook-3.7.0.tgz
+HeadNode:
+  InstanceType: t2.micro
+  Ssh:
+    KeyName: xiaoyaoe_east2
+  Networking:
+    SubnetId: subnet-00fc97de5254abdeb
+  Iam:
+    AdditionalIamPolicies:
+      - Policy: arn:aws:iam::aws:policy/AmazonSSMFullAccess
+    S3Access:
+      - BucketName: aps.week3
+        EnableWriteAccess: true
+  Imds:
+    Secured: true
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: queue
+      ComputeResources:
+        - Name: compute
+          MinCount: 3
+          MaxCount: 10
+          InstanceType: t2.micro
+      Networking:
+        SubnetIds:
+          - subnet-01297f3da27527e68
+      CustomActions:
+        OnNodeStart:
+          Script: s3://aps.week3/preinstall.sh
+      Iam:
+        S3Access:
+          - BucketName: aps.week3
+            EnableWriteAccess: true
+

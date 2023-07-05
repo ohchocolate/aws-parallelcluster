@@ -22,6 +22,8 @@ structure DescribeClusterRequest {
     clusterName: ClusterName,
     @httpQuery("region")
     region: Region,
+    @httpQuery("verbose")
+    verbose: Boolean,
 }
 
 structure DescribeClusterResponse {
@@ -63,4 +65,6 @@ structure DescribeClusterResponse {
     headNode: EC2Instance,
     @documentation("Failures array containing failures reason and code when the stack is in CREATE_FAILED status.")
     failures: Failures
+    @documentation("Detailed information about the cluster, provided only when the 'verbose' flag is set to true.")
+    details: Details
 }

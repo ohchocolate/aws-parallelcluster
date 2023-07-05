@@ -1,0 +1,10 @@
+{%- import 'tests/integration-tests/configs/common.jinja2' as common with context -%}
+---
+test-suites:
+  config_converter:
+    test_config_converter.py::test_converter_command:
+      dimensions:
+        - regions: ["us-west-1"]
+          instances: ["c5.xlarge"]
+          oss: ["alinux2"]
+          schedulers: ["slurm"]

@@ -19,6 +19,7 @@ from pcluster.api.models.cloud_formation_stack_status import CloudFormationStack
 from pcluster.api.models.cluster_configuration_structure import ClusterConfigurationStructure
 from pcluster.api.models.cluster_status import ClusterStatus
 from pcluster.api.models.compute_fleet_status import ComputeFleetStatus
+from pcluster.api.models.detail import Detail
 from pcluster.api.models.ec2_instance import EC2Instance
 from pcluster.api.models.failure import Failure
 from pcluster.api.models.scheduler import Scheduler
@@ -47,6 +48,7 @@ class DescribeClusterResponseContent(Model):
         cluster_status=None,
         scheduler=None,
         failures=None,
+        details=None,
     ):
         """DescribeClusterResponseContent - a model defined in OpenAPI
 
@@ -77,6 +79,8 @@ class DescribeClusterResponseContent(Model):
         :param scheduler: The scheduler of this DescribeClusterResponseContent.  # noqa: E501
         :type scheduler: Scheduler
         :type failures: List[Failure]
+        :param details: The details of this DescribeClusterResponseContent.  # noqa: E501
+        :type details: List[Detail]
         """
         self.openapi_types = {
             "creation_time": datetime,
@@ -93,6 +97,7 @@ class DescribeClusterResponseContent(Model):
             "cluster_status": ClusterStatus,
             "scheduler": Scheduler,
             "failures": List[Failure],
+            "details": List[Detail],
         }
 
         self.attribute_map = {
@@ -110,6 +115,7 @@ class DescribeClusterResponseContent(Model):
             "cluster_status": "clusterStatus",
             "scheduler": "scheduler",
             "failures": "failures",
+            "details": "details",
         }
 
         self._creation_time = creation_time
@@ -126,6 +132,7 @@ class DescribeClusterResponseContent(Model):
         self._cluster_status = cluster_status
         self._head_node = head_node
         self._scheduler = scheduler
+        self._details = details
 
     @classmethod
     def from_dict(cls, dikt) -> "DescribeClusterResponseContent":
@@ -477,3 +484,26 @@ class DescribeClusterResponseContent(Model):
         """
 
         self._failures = failures
+
+    @property
+    def details(self):
+        """Gets the details of this DescribeClusterResponseContent.
+
+        Detailed information about the cluster, provided only when the 'verbose' flag is set to true.  # noqa: E501
+
+        :return: The details of this DescribeClusterResponseContent.
+        :rtype: List[Detail]
+        """
+        return self._details
+
+    @details.setter
+    def details(self, details):
+        """Sets the details of this DescribeClusterResponseContent.
+
+        Detailed information about the cluster, provided only when the 'verbose' flag is set to true.  # noqa: E501
+
+        :param details: The details of this DescribeClusterResponseContent.
+        :type details: List[Detail]
+        """
+
+        self._details = details
