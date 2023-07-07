@@ -42,6 +42,7 @@ from pcluster.api.models import (
     CreateClusterResponseContent,
     DeleteClusterResponseContent,
     DescribeClusterResponseContent,
+    Detail,
     EC2Instance,
     Failure,
     InstanceState,
@@ -53,7 +54,6 @@ from pcluster.api.models import (
     UpdateClusterResponseContent,
     UpdateError,
     ValidationLevel,
-    Detail,
 )
 from pcluster.api.util import assert_valid_node_js
 from pcluster.aws.aws_api import AWSApi
@@ -77,12 +77,12 @@ LOGGER = logging.getLogger(__name__)
 @convert_errors()
 @http_success_status_code(202)
 def create_cluster(
-        create_cluster_request_content: Dict,
-        region: str = None,
-        suppress_validators: List[str] = None,
-        validation_failure_level: str = None,
-        dryrun: bool = None,
-        rollback_on_failure: bool = None,
+    create_cluster_request_content: Dict,
+    region: str = None,
+    suppress_validators: List[str] = None,
+    validation_failure_level: str = None,
+    dryrun: bool = None,
+    rollback_on_failure: bool = None,
 ) -> CreateClusterResponseContent:
     """
     Create a managed cluster in a given region.
@@ -240,8 +240,8 @@ def describe_cluster(cluster_name, region=None, verbose=None):
         scheduler=Scheduler(type=cluster.stack.scheduler),
         failures=_get_creation_failures(cluster_status, cfn_stack),
         # temporary placeholder for getting the details
-        # details=_get_alarms_in_alarm(cfn_stack),
-        details=[Detail(alarm_type="123", alarm_state="234")],
+        details=_get_alarms_in_alarm(cfn_stack),
+        # details=[Detail(alarm_type="123", alarm_state="234")],
     )
 
     try:
@@ -300,13 +300,13 @@ def list_clusters(region=None, next_token=None, cluster_status=None):
 @convert_errors()
 @http_success_status_code(202)
 def update_cluster(
-        update_cluster_request_content: Dict,
-        cluster_name,
-        suppress_validators=None,
-        validation_failure_level=None,
-        region=None,
-        dryrun=None,
-        force_update=None,
+    update_cluster_request_content: Dict,
+    cluster_name,
+    suppress_validators=None,
+    validation_failure_level=None,
+    region=None,
+    dryrun=None,
+    force_update=None,
 ):
     """
     Update a cluster managed in a given region.
@@ -473,9 +473,7 @@ def _get_creation_failures(cluster_status, cfn_stack):
 #         })
 #     return alarm_details
 
+
 def _get_alarms_in_alarm(cfn_stack):
     alarms_in_alarm = cfn_stack.get_alarms_in_alarm()
     return alarms_in_alarm
-
-
-
