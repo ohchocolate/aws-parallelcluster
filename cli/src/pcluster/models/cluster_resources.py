@@ -219,10 +219,10 @@ class ClusterStack(StackInfo):
                 if alarm["StateValue"] == "ALARM":
                     # append AlarmDetail object
                     alarms_in_alarm.append(AlarmDetail(alarm_type=alarm["AlarmName"], alarm_state=alarm["StateValue"]))
-            if not alarms_in_alarm:
-                return "No alarms in 'ALARM' state."
-            else:
-                return alarms_in_alarm
+        if not alarms_in_alarm:
+            return "No alarms in 'ALARM' state."
+        else:
+            return alarms_in_alarm
 
 
 class ClusterInstance(InstanceInfo):
