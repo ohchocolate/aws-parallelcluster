@@ -239,9 +239,7 @@ def describe_cluster(cluster_name, region=None, verbose=None):
         cluster_status=cluster_status,
         scheduler=Scheduler(type=cluster.stack.scheduler),
         failures=_get_creation_failures(cluster_status, cfn_stack),
-        # temporary placeholder for getting the details
         details=_get_alarms_in_alarm(cfn_stack),
-        # details=[Detail(alarm_type="123", alarm_state="234")],
     )
 
     try:
@@ -459,21 +457,14 @@ def _get_creation_failures(cluster_status, cfn_stack):
     return [Failure(failure_code=failure_code, failure_reason=failure_reason)]
 
 
-# cfn stack structure --> boto3 alarm status
-# def _get_alarm(aws_region):
-#     """Get a list of alarm with the alarm type and alarm state"""
-#     cw_client = boto3.client("cloudwatch", region_name=aws_region)
-#     response = cw_client.describe_alarms()
-#     metric_alarms = response["MetricAlarms"]
-#     alarm_details = []
-#     for alarm in metric_alarms:
-#         alarm_details.append({
-#             "AlarmName": alarm["AlarmName"],
-#             "StateValue": alarm["StateValue"]
-#         })
-#     return alarm_details
-
-
 def _get_alarms_in_alarm(cfn_stack):
     alarms_in_alarm = cfn_stack.get_alarms_in_alarm()
-    return alarms_in_alarm
+
+    if isinstance(alarms_in_alarm, str):
+        # if there is no alarms in alarm state, return the string "No alarms in 'ALARM' state."
+        return alarms_in_alarm
+
+    # convert AlarmDetail instances to Detail instances
+    alarm_details = [Detail(alarm_type=alarm_detail.alarm_type, alarm_state=alarm_detail.alarm_state)
+                     for alarm_detail in alarms_in_alarm]
+    return alarm_details

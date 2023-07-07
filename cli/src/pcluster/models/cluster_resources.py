@@ -202,24 +202,23 @@ class ClusterStack(StackInfo):
 
     def get_alarms_in_alarm(self):
         @dataclass
-        class Detail:
+        class AlarmDetail:
+            """Represent the object holding the details of alarms."""
             alarm_type: str
             alarm_state: str
 
         cw = boto3.client("cloudwatch", region_name="us-east-2")
         alarm_names = self._get_alarm_names()
-        print(alarm_names)
         alarms_in_alarm = []
         for name in alarm_names:
             # Get the details of the alarm
-            # all alarm names
             response = cw.describe_alarms(AlarmNames=[name])
 
             # If the alarm is in 'ALARM' state, add it to the list
             for alarm in response["MetricAlarms"]:
                 if alarm["StateValue"] == "ALARM":
-                    # append Detail object
-                    alarms_in_alarm.append(Detail(alarm_type=alarm["AlarmName"], alarm_state=alarm["StateValue"]))
+                    # append AlarmDetail object
+                    alarms_in_alarm.append(AlarmDetail(alarm_type=alarm["AlarmName"], alarm_state=alarm["StateValue"]))
             if not alarms_in_alarm:
                 return "No alarms in 'ALARM' state."
             else:
