@@ -77,12 +77,12 @@ LOGGER = logging.getLogger(__name__)
 @convert_errors()
 @http_success_status_code(202)
 def create_cluster(
-    create_cluster_request_content: Dict,
-    region: str = None,
-    suppress_validators: List[str] = None,
-    validation_failure_level: str = None,
-    dryrun: bool = None,
-    rollback_on_failure: bool = None,
+        create_cluster_request_content: Dict,
+        region: str = None,
+        suppress_validators: List[str] = None,
+        validation_failure_level: str = None,
+        dryrun: bool = None,
+        rollback_on_failure: bool = None,
 ) -> CreateClusterResponseContent:
     """
     Create a managed cluster in a given region.
@@ -239,7 +239,7 @@ def describe_cluster(cluster_name, region=None, verbose=None):
         cluster_status=cluster_status,
         scheduler=Scheduler(type=cluster.stack.scheduler),
         failures=_get_creation_failures(cluster_status, cfn_stack),
-        details=_get_alarms_in_alarm(cfn_stack),
+        details=_get_details(cfn_stack, verbose),
     )
 
     try:
@@ -298,13 +298,13 @@ def list_clusters(region=None, next_token=None, cluster_status=None):
 @convert_errors()
 @http_success_status_code(202)
 def update_cluster(
-    update_cluster_request_content: Dict,
-    cluster_name,
-    suppress_validators=None,
-    validation_failure_level=None,
-    region=None,
-    dryrun=None,
-    force_update=None,
+        update_cluster_request_content: Dict,
+        cluster_name,
+        suppress_validators=None,
+        validation_failure_level=None,
+        region=None,
+        dryrun=None,
+        force_update=None,
 ):
     """
     Update a cluster managed in a given region.
@@ -457,14 +457,23 @@ def _get_creation_failures(cluster_status, cfn_stack):
     return [Failure(failure_code=failure_code, failure_reason=failure_reason)]
 
 
-def _get_alarms_in_alarm(cfn_stack):
+def _get_details(cfn_stack, verbose):
+    if verbose:
+        alarm_details = _get_alarms_details(cfn_stack)
+    else:
+        alarm_details = None
+    return alarm_details
+
+
+def _get_alarms_details(cfn_stack):
     alarms_in_alarm = cfn_stack.get_alarms_in_alarm()
 
-    if isinstance(alarms_in_alarm, str):
-        # if there is no alarms in alarm state, return the string "No alarms in 'ALARM' state."
-        return alarms_in_alarm
+    if not alarms_in_alarm:
+        return None
 
     # convert AlarmDetail instances to Detail instances
-    alarm_details = [Detail(alarm_type=alarm_detail.alarm_type, alarm_state=alarm_detail.alarm_state)
-                     for alarm_detail in alarms_in_alarm]
+    alarm_details = [
+        Detail(alarm_type=alarm_detail["alarm_type"], alarm_state=alarm_detail["alarm_state"])
+        for alarm_detail in alarms_in_alarm
+    ]
     return alarm_details

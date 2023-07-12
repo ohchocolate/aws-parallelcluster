@@ -93,8 +93,8 @@ class ClusterStack(StackInfo):
 
         def _is_failed_wait(event):
             if (
-                event.get("ResourceType") == "AWS::CloudFormation::WaitCondition"
-                and event.get("ResourceStatus") == "CREATE_FAILED"
+                    event.get("ResourceType") == "AWS::CloudFormation::WaitCondition"
+                    and event.get("ResourceStatus") == "CREATE_FAILED"
             ):
                 return True
             return False
@@ -191,6 +191,7 @@ class ClusterStack(StackInfo):
         return failure.failure_code, failure.api_failure_reason
 
     def _get_alarm_names(self):
+        """Get alarm names using cw stack resources."""
         stack_resources = describe_stack_resources(self.name)
         alarm_names = []
         for resource in stack_resources.values():
@@ -201,28 +202,19 @@ class ClusterStack(StackInfo):
         return alarm_names
 
     def get_alarms_in_alarm(self):
+        """Loop through the alarm names to get alarms in alarm."""
+
         @dataclass
         class AlarmDetail:
             """Represent the object holding the details of alarms."""
+
             alarm_type: str
             alarm_state: str
 
-        cw = boto3.client("cloudwatch", region_name="us-east-2")
         alarm_names = self._get_alarm_names()
-        alarms_in_alarm = []
-        for name in alarm_names:
-            # Get the details of the alarm
-            response = cw.describe_alarms(AlarmNames=[name])
+        alarms_in_alarm = AWSApi.instance().cloudwatch.get_alarms_in_alarm(alarm_names)
 
-            # If the alarm is in 'ALARM' state, add it to the list
-            for alarm in response["MetricAlarms"]:
-                if alarm["StateValue"] == "ALARM":
-                    # append AlarmDetail object
-                    alarms_in_alarm.append(AlarmDetail(alarm_type=alarm["AlarmName"], alarm_state=alarm["StateValue"]))
-        if not alarms_in_alarm:
-            return "No alarms in 'ALARM' state."
-        else:
-            return alarms_in_alarm
+        return alarms_in_alarm
 
 
 class ClusterInstance(InstanceInfo):
@@ -312,12 +304,12 @@ class ExportClusterLogsFiltersParser(ClusterLogsFiltersParser):
     """Class to manage export cluster logs filters."""
 
     def __init__(
-        self,
-        head_node: ClusterInstance,
-        log_group_name: str,
-        start_time: datetime.datetime = None,
-        end_time: datetime.datetime = None,
-        filters: List[str] = None,
+            self,
+            head_node: ClusterInstance,
+            log_group_name: str,
+            start_time: datetime.datetime = None,
+            end_time: datetime.datetime = None,
+            filters: List[str] = None,
     ):
         super().__init__(head_node, filters)
         self.time_parser = LogGroupTimeFiltersParser(log_group_name, start_time, end_time)

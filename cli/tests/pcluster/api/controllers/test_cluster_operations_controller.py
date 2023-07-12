@@ -90,6 +90,7 @@ Scheduling:
         dryrun=None,
         region=None,
         rollback_on_failure=None,
+        verbose=None,
     ):
         query_string = []
         if suppress_validators:
@@ -103,6 +104,8 @@ Scheduling:
         if region:
             query_string.append(("region", region))
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if verbose:
+            query_string.append(("verbose", True))
         return client.open(
             self.url,
             method=self.method,
@@ -113,7 +116,7 @@ Scheduling:
 
     @pytest.mark.parametrize(
         "create_cluster_request_content, errors, suppress_validators, validation_failure_level, region, "
-        "rollback_on_failure",
+        "rollback_on_failure, verbose",
         [
             pytest.param(
                 {"clusterName": "cluster", "clusterConfiguration": CONFIG},
@@ -122,6 +125,7 @@ Scheduling:
                 None,
                 "us-east-1",
                 None,
+                True,
                 id="test with all errors",
             ),
             pytest.param(
@@ -131,6 +135,7 @@ Scheduling:
                 ValidationLevel.WARNING,
                 "us-east-1",
                 False,
+                True,
                 id="test with filtered errors",
             ),
             pytest.param(
@@ -139,6 +144,7 @@ Scheduling:
                 ["type:type1", "type:type2"],
                 ValidationLevel.WARNING,
                 "us-east-1",
+                True,
                 True,
                 id="test with no errors",
             ),
@@ -154,6 +160,7 @@ Scheduling:
         validation_failure_level,
         region,
         rollback_on_failure,
+        verbose,
     ):
         cluster_create_mock = mocker.patch("pcluster.models.cluster.Cluster.create", return_value=("id", errors))
 
@@ -165,6 +172,7 @@ Scheduling:
             False,
             region,
             rollback_on_failure,
+            verbose,
         )
 
         expected_response = {
@@ -570,9 +578,10 @@ class TestDescribeCluster:
         )
 
     @pytest.mark.parametrize(
-        "cfn_stack_data, head_node_data, fail_on_bucket_check, scheduler, expected_response",
+        "verbose, cfn_stack_data, head_node_data, fail_on_bucket_check, scheduler, expected_response",
         [
             (
+                True,
                 cfn_describe_stack_mock_response(
                     {
                         "Parameters": [
@@ -621,6 +630,7 @@ class TestDescribeCluster:
                 },
             ),
             (
+                True,
                 cfn_describe_stack_mock_response(
                     {
                         "Parameters": [
@@ -654,6 +664,7 @@ class TestDescribeCluster:
                 },
             ),
             (
+                True,
                 cfn_describe_stack_mock_response(
                     {
                         "Parameters": [
@@ -687,6 +698,7 @@ class TestDescribeCluster:
                 },
             ),
             (
+                True,
                 cfn_describe_stack_mock_response(
                     {
                         "LastUpdatedTime": datetime(2021, 5, 30),
@@ -725,6 +737,7 @@ class TestDescribeCluster:
                 },
             ),
             (
+                True,
                 cfn_describe_stack_mock_response(
                     {
                         "Parameters": [
@@ -783,12 +796,16 @@ class TestDescribeCluster:
         scheduler,
         metadata,
         expected_response,
+        verbose,
     ):
+        # mocker.patch(pcluster.aws.cloudwatch.func
+        # add function, mock api calls
         mocker.patch("pcluster.aws.cfn.CfnClient.describe_stack", return_value=cfn_stack_data)
         mocker.patch(
             "pcluster.aws.ec2.Ec2Client.describe_instances",
             return_value=([head_node_data], "") if head_node_data else ([], ""),
         )
+        # "pcluster.aws.cfn.CfnClient.get_stack_resources" check path
         mocker.patch(
             "pcluster.aws.cfn.CfnClient.get_stack_events",
             return_value={
@@ -1150,7 +1167,7 @@ class TestListClusters:
     url = "/v3/clusters"
     method = "GET"
 
-    def _send_test_request(self, client, region="us-east-1", next_token=None, cluster_status_list=None):
+    def _send_test_request(self, client, region="us-east-1", next_token=None, cluster_status_list=None, verbose=None):
         query_string = []
         if region:
             query_string.append(("region", region))
@@ -1158,6 +1175,8 @@ class TestListClusters:
             query_string.append(("nextToken", next_token))
         if cluster_status_list:
             query_string.extend([("clusterStatus", status) for status in cluster_status_list])
+        if verbose:
+            query_string.append("verbose", True)
         headers = {"Accept": "application/json"}
         return client.open(self.url, method=self.method, headers=headers, query_string=query_string)
 

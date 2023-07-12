@@ -12,6 +12,7 @@ import os
 
 from pcluster.aws.batch import BatchClient
 from pcluster.aws.cfn import CfnClient
+from pcluster.aws.cloudwatch import CloudWatchClient
 from pcluster.aws.dynamo import DynamoResource
 from pcluster.aws.ec2 import Ec2Client
 from pcluster.aws.efs import EfsClient
@@ -45,6 +46,7 @@ class AWSApi:
 
         self._batch = None
         self._cfn = None
+        self._cloudwatch = None
         self._ec2 = None
         self._efs = None
         self._fsx = None
@@ -110,6 +112,12 @@ class AWSApi:
         if not self._kms:
             self._kms = KmsClient()
         return self._kms
+
+    @property
+    def cloudwatch(self):
+        if not self._cloudwatch:
+            self._cloudwatch = CloudWatchClient()
+        return self._cloudwatch
 
     @property
     def imagebuilder(self):
