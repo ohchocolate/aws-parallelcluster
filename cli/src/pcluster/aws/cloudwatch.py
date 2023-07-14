@@ -23,16 +23,14 @@ class CloudWatchClient(Boto3Client):
         """Describe alarms."""
         return self._client.describe_alarms(AlarmNames=alarm_names)
 
+    @AWSExceptionHandler.handle_client_exception
     def get_alarms_in_alarm(self, alarm_names):
+        """Get alarms with the state value of alarm"""
         alarms_in_alarm = []
         response = self.describe_alarms(alarm_names)
         # If the alarm is in 'ALARM' state, add it to the list
         for alarm in response["MetricAlarms"]:
             if alarm["StateValue"] == "ALARM":
-                alarm_detail = {
-                    "alarm_type": alarm["AlarmName"],
-                    "alarm_state": alarm["StateValue"]
-                }
+                alarm_detail = {"alarm_type": alarm["AlarmName"], "alarm_state": alarm["StateValue"]}
                 alarms_in_alarm.append(alarm_detail)
         return alarms_in_alarm
-

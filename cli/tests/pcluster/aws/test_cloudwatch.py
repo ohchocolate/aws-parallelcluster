@@ -25,8 +25,45 @@ def boto3_stubber_path():
 
 class TestCloudWatchClient:
     @pytest.mark.parametrize(
-        "describe_alarms_response, expected_response",
-        [(
+        "describe_alarms_response, expected_response, expect_error",
+        [
+            pytest.param(
+                {"MetricAlarms": []},
+                [],
+                False,
+                id="test with no alarms",
+            ),
+            pytest.param(
+                {
+                    "MetricAlarms": [
+                        {
+                            "AlarmName": "Alarm1",
+                            "AlarmArn": "arn:aws:cloudwatch:us-east-2:123:alarm:Alarm1",
+                            "AlarmConfigurationUpdatedTimestamp": "2023-06-13T14:52:07.908000+00:00",
+                            "ActionsEnabled": True,
+                            "OKActions": [],
+                            "AlarmActions": [],
+                            "InsufficientDataActions": [],
+                            "StateValue": "OK",
+                            "StateReason": "",
+                            "StateReasonData": "{}",
+                            "StateUpdatedTimestamp": "2023-07-07T20:39:26.932000+00:00",
+                            "MetricName": "ClusterInProtectedMode",
+                            "Namespace": "ParallelCluster",
+                            "Statistic": "Average",
+                            "Dimensions": [{"Name": "ClusterName", "Value": "test"}],
+                            "Period": 60,
+                            "EvaluationPeriods": 1,
+                            "DatapointsToAlarm": 1,
+                            "Threshold": 1.0,
+                        }
+                    ]
+                },
+                [],
+                False,
+                id="test with OK alarms only",
+            ),
+            pytest.param(
                 {
                     "MetricAlarms": [
                         {
@@ -38,128 +75,91 @@ class TestCloudWatchClient:
                             "AlarmActions": [],
                             "InsufficientDataActions": [],
                             "StateValue": "INSUFFICIENT_DATA",
-                            "StateReason": "Insufficient Data: 1 datapoint was unknown.",
-                            "StateReasonData": "{}",
-                            "StateUpdatedTimestamp": "2023-06-19T21:05:38.314000+00:00",
-                            "MetricName": "ClusterInProtectedMode",
-                            "Namespace": "ParallelCluster",
-                            "Statistic": "SampleCount",
-                            "Dimensions": [
-                                {
-                                    "Name": "ClusterName",
-                                    "Value": "Metric1"
-                                }
-                            ],
-                            "Period": 60,
-                            "EvaluationPeriods": 1,
-                            "DatapointsToAlarm": 1,
-                            "Threshold": 1.0,
-                            "ComparisonOperator": "GreaterThanOrEqualToThreshold",
-                            "TreatMissingData": "missing",
-                            "StateTransitionedTimestamp": "2023-06-19T21:05:38.314000+00:00"
                         },
-                    ],
-                },
-                {
-                    "MetricAlarms": [
                         {
-                            "AlarmName": "Alarm1",
-                            "AlarmArn": "arn:aws:cloudwatch:us-east-2:123:alarm:Alarm1",
-                            "AlarmConfigurationUpdatedTimestamp": "2023-06-13T14:52:07.908000+00:00",
+                            "AlarmName": "Alarm2",
+                            "AlarmArn": "arn:aws:cloudwatch:us-east-2:666:alarm:test2_ProtectedModeAlarm_HeadNode",
+                            "AlarmConfigurationUpdatedTimestamp": "2023-07-12T15:50:52.691000+00:00",
                             "ActionsEnabled": True,
                             "OKActions": [],
                             "AlarmActions": [],
                             "InsufficientDataActions": [],
                             "StateValue": "INSUFFICIENT_DATA",
-                            "StateReason": "Insufficient Data: 1 datapoint was unknown.",
-                            "StateReasonData": "{}",
-                            "StateUpdatedTimestamp": "2023-06-19T21:05:38.314000+00:00",
-                            "MetricName": "ClusterInProtectedMode",
-                            "Namespace": "ParallelCluster",
-                            "Statistic": "SampleCount",
-                            "Dimensions": [
-                                {
-                                    "Name": "ClusterName",
-                                    "Value": "Metric1"
-                                }
-                            ],
-                            "Period": 60,
-                            "EvaluationPeriods": 1,
-                            "DatapointsToAlarm": 1,
-                            "Threshold": 1.0,
-                            "ComparisonOperator": "GreaterThanOrEqualToThreshold",
-                            "TreatMissingData": "missing",
-                            "StateTransitionedTimestamp": "2023-06-19T21:05:38.314000+00:00"
                         },
-                    ],
+                    ]
                 },
-        )],
-
+                [],
+                False,
+                id="test with INSUFFICIENT_DATA alarms only",
+            ),
+            pytest.param(
+                {
+                    "MetricAlarms": [
+                        {"AlarmName": "Alarm1", "StateValue": "ALARM"},
+                        {"AlarmName": "Alarm2", "StateValue": "OK"},
+                    ]
+                },
+                [{"alarm_type": "Alarm1", "alarm_state": "ALARM"}],
+                False,
+                id="test with some alarms in 'ALARM' state",
+            ),
+            pytest.param(
+                {
+                    "MetricAlarms": [
+                        {
+                            "AlarmName": "Alarm1",
+                            "AlarmArn": "arn:aws:cloudwatch:us-east-2:666:alarm:test1_ProtectedModeAlarm_HeadNode",
+                            "AlarmConfigurationUpdatedTimestamp": "2023-07-06T18:50:52.691000+00:00",
+                            "ActionsEnabled": True,
+                            "OKActions": [],
+                            "AlarmActions": [],
+                            "InsufficientDataActions": [],
+                            "StateValue": "ALARM",
+                        },
+                        {
+                            "AlarmName": "Alarm2",
+                            "AlarmArn": "arn:aws:cloudwatch:us-east-2:666:alarm:test2_ProtectedModeAlarm_HeadNode",
+                            "AlarmConfigurationUpdatedTimestamp": "2023-07-12T15:50:52.691000+00:00",
+                            "ActionsEnabled": True,
+                            "OKActions": [],
+                            "AlarmActions": [],
+                            "InsufficientDataActions": [],
+                            "StateValue": "ALARM",
+                        },
+                    ]
+                },
+                [
+                    {"alarm_type": "Alarm1", "alarm_state": "ALARM"},
+                    {"alarm_type": "Alarm2", "alarm_state": "ALARM"},
+                ],
+                False,
+                id="test with all alarms in 'ALARM' state",
+            ),
+            pytest.param(Exception("An error occurred"), None, True, id="test with exceptions"),
+        ],
     )
-    def test_describe_alarms(self, set_env, boto3_stubber, describe_alarms_response, expected_response):
-        set_env("AWS_DEFAULT_REGION", "us-east-1")
-
+    def test_get_alarms_in_alarm(
+        self, set_env, boto3_stubber, describe_alarms_response, expected_response, expect_error
+    ):
+        set_env("AWS_DEFAULT_REGION", "us-east-2")
         generate_error = isinstance(describe_alarms_response, Exception)
         mocked_requests = [
             MockedBoto3Request(
                 method="describe_alarms",
                 response=describe_alarms_response if not generate_error else "error",
-                expected_params={"AlarmNames": ["Alarm1"]},
+                expected_params={"AlarmNames": ["Alarm1", "Alarm2"]},
                 generate_error=generate_error,
                 error_code="error" if generate_error else None,
             )
         ]
+
         boto3_stubber("cloudwatch", mocked_requests)
 
         cw_client = CloudWatchClient()
-        response = cw_client.describe_alarms(["Alarm1"])
-        assert response == expected_response
-
-    @pytest.mark.parametrize(
-        "describe_alarms_response, expected_response",
-        [
-            (
-                    {"MetricAlarms": []},
-                    [],
-            ),
-            (
-                    {"MetricAlarms": [{"AlarmName": "Alarm1", "StateValue": "OK"}]},
-                    [],
-            ),
-            (
-                    {
-                        "MetricAlarms": [
-                            {"AlarmName": "Alarm1", "StateValue": "ALARM"},
-                            {"AlarmName": "Alarm2", "StateValue": "OK"},
-                        ]
-                    },
-                    [{"alarm_type": "Alarm1", "alarm_state": "ALARM"}],
-            ),
-            (
-                    {
-                        "MetricAlarms": [
-                            {"AlarmName": "Alarm1", "StateValue": "ALARM"},
-                            {"AlarmName": "Alarm2", "StateValue": "ALARM"},
-                        ]
-                    },
-                    [
-                        {"alarm_type": "Alarm1", "alarm_state": "ALARM"},
-                        {"alarm_type": "Alarm2", "alarm_state": "ALARM"},
-                    ],
-            ),
-        ],
-    )
-    def test_get_alarms_in_alarm(self, set_env, boto3_stubber, describe_alarms_response, expected_response):
-        set_env("AWS_DEFAULT_REGION", "us-east-1")
-        mocked_requests = [
-            MockedBoto3Request(
-                method="describe_alarms",
-                response=describe_alarms_response,
-                expected_params={"AlarmNames": ["Alarm1", "Alarm2"]},
-            )
-        ]
-        boto3_stubber("cloudwatch", mocked_requests)
-
-        cw_client = CloudWatchClient()
-        response = cw_client.get_alarms_in_alarm(["Alarm1", "Alarm2"])
-        assert response == expected_response
+        if not expect_error:
+            response = cw_client.get_alarms_in_alarm(["Alarm1", "Alarm2"])
+            assert response == expected_response
+        else:
+            with pytest.raises(AWSClientError) as e:
+                cw_client.get_alarms_in_alarm(["Alarm1", "Alarm2"])
+            assert_that(e.value.error_code).is_equal_to("error")

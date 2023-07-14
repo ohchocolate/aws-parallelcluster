@@ -14,8 +14,6 @@ import re
 from dataclasses import dataclass
 from typing import List
 
-import boto3
-
 from pcluster.aws.aws_api import AWSApi
 from pcluster.aws.aws_resources import InstanceInfo, StackInfo
 from pcluster.constants import CW_LOGS_CFN_PARAM_NAME, OS_MAPPING, PCLUSTER_NODE_TYPE_TAG, PCLUSTER_VERSION_TAG
@@ -93,8 +91,8 @@ class ClusterStack(StackInfo):
 
         def _is_failed_wait(event):
             if (
-                    event.get("ResourceType") == "AWS::CloudFormation::WaitCondition"
-                    and event.get("ResourceStatus") == "CREATE_FAILED"
+                event.get("ResourceType") == "AWS::CloudFormation::WaitCondition"
+                and event.get("ResourceStatus") == "CREATE_FAILED"
             ):
                 return True
             return False
@@ -203,14 +201,6 @@ class ClusterStack(StackInfo):
 
     def get_alarms_in_alarm(self):
         """Loop through the alarm names to get alarms in alarm."""
-
-        @dataclass
-        class AlarmDetail:
-            """Represent the object holding the details of alarms."""
-
-            alarm_type: str
-            alarm_state: str
-
         alarm_names = self._get_alarm_names()
         alarms_in_alarm = AWSApi.instance().cloudwatch.get_alarms_in_alarm(alarm_names)
 
@@ -304,12 +294,12 @@ class ExportClusterLogsFiltersParser(ClusterLogsFiltersParser):
     """Class to manage export cluster logs filters."""
 
     def __init__(
-            self,
-            head_node: ClusterInstance,
-            log_group_name: str,
-            start_time: datetime.datetime = None,
-            end_time: datetime.datetime = None,
-            filters: List[str] = None,
+        self,
+        head_node: ClusterInstance,
+        log_group_name: str,
+        start_time: datetime.datetime = None,
+        end_time: datetime.datetime = None,
+        filters: List[str] = None,
     ):
         super().__init__(head_node, filters)
         self.time_parser = LogGroupTimeFiltersParser(log_group_name, start_time, end_time)

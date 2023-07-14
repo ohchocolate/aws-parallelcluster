@@ -56,6 +56,57 @@ def cfn_describe_stack_mock_response(edits=None):
     return stack_data
 
 
+def cfn_describe_stack_resources_mock_response(edits=None):
+    stack_resources_data = {
+        "StackResources": [
+            {
+                "StackName": "test",
+                "StackId": "stack_id",
+                "LogicalResourceId": "HeadNode",
+                "PhysicalResourceId": "123456",
+                "ResourceType": "AWS::EC2::Instance",
+                "Timestamp": datetime(2023, 7, 6),
+                "ResourceStatus": "CREATE_COMPLETE",
+                "DriftInformation": {"StackResourceDriftStatus": "NOT_CHECKED"},
+            },
+            {
+                "StackName": "test",
+                "StackId": "stack_id",
+                "LogicalResourceId": "HeadNodeDiskAlarm123",
+                "PhysicalResourceId": "test_MemAlarm_HeadNode",
+                "ResourceType": "AWS::CloudWatch::Alarm",
+                "Timestamp": datetime(2023, 7, 6),
+                "ResourceStatus": "CREATE_COMPLETE",
+                "DriftInformation": {"StackResourceDriftStatus": "NOT_CHECKED"},
+            },
+            {
+                "StackName": "test",
+                "StackId": "stack_id",
+                "LogicalResourceId": "HeadNodeProtectedModeAlarm123",
+                "PhysicalResourceId": "test_ProtectedModeAlarm_HeadNode",
+                "ResourceType": "AWS::CloudWatch::Alarm",
+                "Timestamp": datetime(2023, 7, 6),
+                "ResourceStatus": "CREATE_COMPLETE",
+                "DriftInformation": {"StackResourceDriftStatus": "NOT_CHECKED"},
+            },
+            {
+                "StackName": "test",
+                "StackId": "stack_id",
+                "LogicalResourceId": "HeadNodeMemAlarm123",
+                "PhysicalResourceId": "test_ProtectedModeAlarm_HeadNode",
+                "ResourceType": "AWS::CloudWatch::Alarm",
+                "Timestamp": datetime(2023, 7, 6),
+                "ResourceStatus": "CREATE_COMPLETE",
+                "DriftInformation": {"StackResourceDriftStatus": "NOT_CHECKED"},
+            },
+        ]
+    }
+    if edits:
+        for resource in stack_resources_data["StackResources"]:
+            resource.update(edits)
+    return {res["LogicalResourceId"]: res for res in stack_resources_data["StackResources"]}
+
+
 class TestCreateCluster:
     url = "/v3/clusters"
     method = "POST"
@@ -160,7 +211,6 @@ Scheduling:
         validation_failure_level,
         region,
         rollback_on_failure,
-        verbose,
     ):
         cluster_create_mock = mocker.patch("pcluster.models.cluster.Cluster.create", return_value=("id", errors))
 
@@ -172,7 +222,6 @@ Scheduling:
             False,
             region,
             rollback_on_failure,
-            verbose,
         )
 
         expected_response = {
@@ -570,8 +619,10 @@ class TestDescribeCluster:
     url = "/v3/clusters/{cluster_name}"
     method = "GET"
 
-    def _send_test_request(self, client, cluster_name="clustername", region="us-east-1"):
+    def _send_test_request(self, client, cluster_name="clustername", region="us-east-1", verbose=None):
         query_string = [("region", region)]
+        if verbose:
+            query_string.append(("verbose", verbose))
         headers = {"Accept": "application/json"}
         return client.open(
             self.url.format(cluster_name=cluster_name), method=self.method, headers=headers, query_string=query_string
@@ -790,13 +841,13 @@ class TestDescribeCluster:
         self,
         mocker,
         client,
+        verbose,
         cfn_stack_data,
         head_node_data,
         fail_on_bucket_check,
         scheduler,
         metadata,
         expected_response,
-        verbose,
     ):
         # mocker.patch(pcluster.aws.cloudwatch.func
         # add function, mock api calls
@@ -845,11 +896,175 @@ class TestDescribeCluster:
                 "pcluster.models.cluster.Cluster.config", new_callable=mocker.PropertyMock
             ).side_effect = ClusterActionError("failed")
 
-        response = self._send_test_request(client)
+        response = self._send_test_request(client, verbose=verbose)
 
         with soft_assertions():
             assert_that(response.status_code).is_equal_to(200)
             assert_that(response.get_json()).is_equal_to(expected_response)
+
+    @pytest.mark.parametrize(
+        "verbose, cfn_stack_data, stack_resources_data, cw_alarms, expected_response",
+        [
+            (
+                False,
+                cfn_describe_stack_mock_response(
+                    {
+                        "Parameters": [
+                            {"ParameterKey": "Scheduler", "ParameterValue": "slurm"},
+                        ],
+                    }
+                ),
+                cfn_describe_stack_resources_mock_response(),
+                [],
+                {
+                    "cloudFormationStackStatus": "CREATE_COMPLETE",
+                    "cloudformationStackArn": "arn:aws:cloudformation:us-east-1:123:stack/pcluster3-2/123",
+                    "clusterConfiguration": {"url": "NOT_AVAILABLE"},
+                    "clusterName": "clustername",
+                    "clusterStatus": "CREATE_COMPLETE",
+                    "computeFleetStatus": "UNKNOWN",
+                    "creationTime": to_iso_timestr(datetime(2021, 4, 30)),
+                    "lastUpdatedTime": to_iso_timestr(datetime(2021, 4, 30)),
+                    "tags": [
+                        {"key": "parallelcluster:version", "value": get_installed_version()},
+                        {"key": "parallelcluster:s3_bucket", "value": "bucket_name"},
+                        {
+                            "key": "parallelcluster:cluster_dir",
+                            "value": "parallelcluster/3.0.0/clusters/pcluster3-2-smkloc964uzpm12m",
+                        },
+                    ],
+                    "region": "us-east-1",
+                    "version": get_installed_version(),
+                    "scheduler": {"type": "slurm"},
+                },
+            ),
+            (
+                None,
+                cfn_describe_stack_mock_response(
+                    edits={
+                        "CreationTime": datetime(2023, 7, 13),
+                        "lastUpdatedTime": datetime(2023, 7, 13),
+                        "StackName": "test",
+                    }
+                ),
+                cfn_describe_stack_resources_mock_response(),
+                [],
+                {
+                    "cloudFormationStackStatus": "CREATE_COMPLETE",
+                    "cloudformationStackArn": "arn:aws:cloudformation:us-east-1:123:stack/pcluster3-2/123",
+                    "clusterConfiguration": {"url": "NOT_AVAILABLE"},
+                    "clusterName": "clustername",
+                    "clusterStatus": "CREATE_COMPLETE",
+                    "computeFleetStatus": "UNKNOWN",
+                    "creationTime": to_iso_timestr(datetime(2023, 7, 13)),
+                    "lastUpdatedTime": to_iso_timestr(datetime(2023, 7, 13)),
+                    "tags": [
+                        {"key": "parallelcluster:version", "value": get_installed_version()},
+                        {"key": "parallelcluster:s3_bucket", "value": "bucket_name"},
+                        {
+                            "key": "parallelcluster:cluster_dir",
+                            "value": "parallelcluster/3.0.0/clusters/pcluster3-2-smkloc964uzpm12m",
+                        },
+                    ],
+                    "region": "us-east-1",
+                    "version": get_installed_version(),
+                    "scheduler": {"type": "slurm"},
+                },
+            ),
+            (
+                True,
+                cfn_describe_stack_mock_response(
+                    edits={
+                        "CreationTime": datetime(2023, 7, 4),
+                        "lastUpdatedTime": datetime(2023, 7, 4),
+                    }
+                ),
+                cfn_describe_stack_resources_mock_response(),
+                [],
+                {
+                    "cloudFormationStackStatus": "CREATE_COMPLETE",
+                    "cloudformationStackArn": "arn:aws:cloudformation:us-east-1:123:stack/pcluster3-2/123",
+                    "clusterConfiguration": {"url": "NOT_AVAILABLE"},
+                    "clusterName": "clustername",
+                    "clusterStatus": "CREATE_COMPLETE",
+                    "computeFleetStatus": "UNKNOWN",
+                    "creationTime": to_iso_timestr(datetime(2023, 7, 4)),
+                    "lastUpdatedTime": to_iso_timestr(datetime(2023, 7, 4)),
+                    "tags": [
+                        {"key": "parallelcluster:version", "value": get_installed_version()},
+                        {"key": "parallelcluster:s3_bucket", "value": "bucket_name"},
+                        {
+                            "key": "parallelcluster:cluster_dir",
+                            "value": "parallelcluster/3.0.0/clusters/pcluster3-2-smkloc964uzpm12m",
+                        },
+                    ],
+                    "region": "us-east-1",
+                    "version": get_installed_version(),
+                    "scheduler": {"type": "slurm"},
+                },
+            ),
+            (
+                True,
+                cfn_describe_stack_mock_response(
+                    edits={
+                        "CreationTime": datetime(2023, 7, 13),
+                        "lastUpdatedTime": datetime(2023, 7, 13),
+                        "StackName": "test",
+                    }
+                ),
+                cfn_describe_stack_resources_mock_response(),
+                [{"alarm_type": "test_ProtectedModeAlarm_HeadNode", "alarm_state": "ALARM"}],
+                {
+                    "cloudFormationStackStatus": "CREATE_COMPLETE",
+                    "cloudformationStackArn": "arn:aws:cloudformation:us-east-1:123:stack/pcluster3-2/123",
+                    "clusterConfiguration": {"url": "NOT_AVAILABLE"},
+                    "clusterName": "clustername",
+                    "clusterStatus": "CREATE_COMPLETE",
+                    "computeFleetStatus": "UNKNOWN",
+                    "creationTime": to_iso_timestr(datetime(2023, 7, 13)),
+                    "lastUpdatedTime": to_iso_timestr(datetime(2023, 7, 13)),
+                    "tags": [
+                        {"key": "parallelcluster:version", "value": get_installed_version()},
+                        {"key": "parallelcluster:s3_bucket", "value": "bucket_name"},
+                        {
+                            "key": "parallelcluster:cluster_dir",
+                            "value": "parallelcluster/3.0.0/clusters/pcluster3-2-smkloc964uzpm12m",
+                        },
+                    ],
+                    "region": "us-east-1",
+                    "version": get_installed_version(),
+                    "scheduler": {"type": "slurm"},
+                    "details": [{"alarmType": "test_ProtectedModeAlarm_HeadNode", "alarmState": "ALARM"}],
+                },
+            ),
+        ],
+        ids=[
+            "verbose_false",
+            "verbose_none",
+            "verbose_true_without_alarms_details",
+            "verbose_true_with_alarms_details",
+        ],
+    )
+    def test_describe_cluster_with_verbose_flag(
+        self,
+        mocker,
+        client,
+        cfn_stack_data,
+        stack_resources_data,
+        cw_alarms,
+        expected_response,
+        verbose,
+    ):
+        mocker.patch("pcluster.aws.cfn.CfnClient.describe_stack", return_value=cfn_stack_data)
+        mocker.patch("pcluster.aws.cfn.CfnClient.describe_stack_resources", return_value=stack_resources_data)
+
+        mocker.patch("pcluster.aws.cloudwatch.CloudWatchClient.get_alarms_in_alarm", return_value=cw_alarms)
+
+        response = self._send_test_request(client, verbose=verbose)
+        assert_that(response.status_code).is_equal_to(200)
+        response_json = response.get_json()
+        assert_that(response_json.get("details")).is_equal_to(expected_response.get("details"))
+        assert_that(response.get_json()).is_equal_to(expected_response)
 
     @pytest.mark.parametrize(
         "region, cluster_name, expected_response",
