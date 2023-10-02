@@ -1,2 +1,6 @@
-aws-cdk-lib==2.96.2
-constructs>=10.0.0,<11.0.0
+aws-cdk.core
+aws-cdk.aws_lambda
+aws-cdk.aws_iam
+aws-cdk.aws_secretsmanager
+botocore
+requests
