@@ -30,3 +30,4 @@ __pycache__
 .cdk.staging
 cdk.out
 
+pcluster3.7_env/
