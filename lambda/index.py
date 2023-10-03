@@ -1,8 +1,19 @@
+# uncomment the following line in the lambda console to run tests
+
+# import sys
+# import subprocess
+#
+# subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
+#                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# sys.path.insert(1, '/tmp/')
+# from opensearchpy import OpenSearch, RequestsHttpConnection
+
 import base64
 import datetime
 import json
 import logging
 import math
+import os
 import re
 import zlib
 
@@ -11,13 +22,16 @@ import requests
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 
-# use log to debug
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 session = botocore.session.Session()
 sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
-endpoint = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
+
+endpoint = os.environ["OPENSEARCH_ENDPOINT"]
+
+# original end point
+# endpoint = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
+
 logFailedResponses = False
 
 
@@ -62,7 +76,7 @@ def transform(payload):
         index_name = "cwl-" + ".".join(index_name)
 
         source = build_source(log_event["message"], log_event.get("extractedFields", None))
-        logger.debug("Build the node mapping")
+        logger.info("Build the node mapping")
         if source.get("event-type") == "scontrol-show-job-information":
             source = process_job_info(source)
 
@@ -238,26 +252,26 @@ def is_valid_json(message):
 
 
 def make_request(method, endpoint, data=None):
-    logger.debug(f"Making {method} request to {endpoint} with data: {data}")
+    logger.info(f"Making {method} request to {endpoint} with data: {data}")
     headers = {"Content-Type": "application/json"}
 
     request = AWSRequest(method=method, url=endpoint, data=data, headers=headers)
     request.context["payload_signing_enabled"] = True
 
-    logger.debug("Adding SIGV4 auth to the request...")
+    logger.info("Adding SIGV4 auth to the request...")
     sigv4.add_auth(request)
 
     prepped = request.prepare()
 
-    logger.debug(f"Sending request with URL: {prepped.url}, Headers: {prepped.headers}, Body: {prepped.body}")
+    logger.info(f"Sending request with URL: {prepped.url}, Headers: {prepped.headers}, Body: {prepped.body}")
     response = requests.request(method, prepped.url, data=prepped.body, headers=prepped.headers, timeout=200)
 
-    logger.debug(f"Received response with status code: {response.status_code}, content: {response.text}")
+    logger.info(f"Received response with status code: {response.status_code}, content: {response.text}")
     return response
 
 
 def post(body):
-    logger.debug(f"Posting data: {body}")
+    logger.info(f"Posting data: {body}")
     endpoint_for_post = endpoint + "/_bulk"
     response = make_request("POST", endpoint_for_post, body)
     return response
