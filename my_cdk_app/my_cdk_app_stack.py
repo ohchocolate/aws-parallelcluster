@@ -3,7 +3,6 @@ from aws_cdk import (
     aws_opensearchservice as open_search,
     aws_lambda as _lambda,
     aws_iam as iam,
-    aws_lambda_event_sources as lambda_sources,
     aws_logs as logs,
     aws_secretsmanager as sm
 )
@@ -93,3 +92,10 @@ class MyCdkAppStack(core.Stack):
         )
 
         # Connect CloudWatch log group/log stream with the Lambda func
+        log_group_name = "/aws/parallelcluster/get-log3-202310032109"
+        log_group = logs.LogGroup.from_log_group_name(self, "ExistingLogGroup", log_group_name)
+        log_group.add_subscription_filter(
+            "LambdaSubscriptionFilter",
+            destination=_lambda.LambdaDestination(lambda_function),
+            filter_pattern=logs.FilterPattern.all_events()
+        )
