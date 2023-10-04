@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 AWS ParallelCluster - HPC for the Cloud
 =======================================
 
@@ -210,4 +209,4 @@ command.
  * `cdk docs`        open CDK documentation
 
 Enjoy!
->>>>>>> 8be3d007 (Initial commit)
+
