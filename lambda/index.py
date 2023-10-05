@@ -1,13 +1,3 @@
-# uncomment the following line in the lambda console to run tests
-
-# import sys
-# import subprocess
-#
-# subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
-#                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-# sys.path.insert(1, '/tmp/')
-# from opensearchpy import OpenSearch, RequestsHttpConnection
-
 import base64
 import datetime
 import json

@@ -1,3 +1,5 @@
+import os
+
 from aws_cdk import (
     core,
     aws_opensearchservice as open_search,
@@ -47,33 +49,29 @@ class MyCdkAppStack(core.Stack):
         ))
 
         # optional parameter: engine_version（will use the latest version as default), domain_name
-        domain = open_search.CfnDomain(self,
-                                       "Domain",
-                                       domain_name="my-domain",
-                                       node_to_node_encryption_options={
-                                           "enabled": True
-                                       },
-                                       encryption_at_rest_options={
-                                           "enabled": True
-                                       },
-                                       ebs_options={
-                                           "ebs_enabled": True,
-                                           "volume_size": 10
-                                       },
-                                       node_group_options={
-                                           "node_count": 2,
-                                           "instance_type": "r6g.large.search"
-                                       },
-                                       advanced_security_options={
-                                           "enabled": True,
-                                           "internal_user_database_enabled": True,
-                                           "master_user_options": {
-                                               "master_user_name": "master",
-                                               # Reference the password from Secrets Manager
-                                               "master_user_password": secret.secret_value.to_string()
-                                           }
-                                       }
-                                       )
+        domain = open_search.CfnDomain(
+            self,
+            f"{construct_id}-Domain",
+            domain_name="my-domain",
+            node_to_node_encryption_options=open_search.CfnDomain.NodeToNodeEncryptionOptionsProperty(enabled=True),
+            encryption_at_rest_options=open_search.CfnDomain.EncryptionAtRestOptionsProperty(enabled=True),
+            ebs_options=open_search.CfnDomain.EBSOptionsProperty(
+                ebs_enabled=True,
+                volume_size=10,
+            ),
+            advanced_security_options=open_search.CfnDomain.AdvancedSecurityOptionsInputProperty(
+                enabled=True,
+                internal_user_database_enabled=True,
+                master_user_options=open_search.CfnDomain.MasterUserOptionsProperty(
+                    master_user_name="master",
+                    master_user_password=secret.secret_value.unsafe_unwrap(),
+                )
+            ),
+            domain_endpoint_options=open_search.CfnDomain.DomainEndpointOptionsProperty(
+                enforce_https=True,
+                tls_security_policy="Policy-Min-TLS-1-2-2019-07",
+            )
+        )
 
         endpoint = domain.attr_domain_endpoint
         # Create the first Lambda function with the defined role
@@ -82,7 +80,7 @@ class MyCdkAppStack(core.Stack):
             self,
             "push-log",
             role=role,
-            code=_lambda.Code.from_asset("lambda/index.py"),
+            code=_lambda.Code.from_asset(os.path.join(os.path.dirname("index.py"), "lambda")),
             runtime=_lambda.Runtime.PYTHON_3_8,
             handler="index.lambda_handler",
             environment={
@@ -92,10 +90,10 @@ class MyCdkAppStack(core.Stack):
         )
 
         # Connect CloudWatch log group/log stream with the Lambda func
-        log_group_name = "/aws/parallelcluster/get-log3-202310032109"
-        log_group = logs.LogGroup.from_log_group_name(self, "ExistingLogGroup", log_group_name)
-        log_group.add_subscription_filter(
-            "LambdaSubscriptionFilter",
-            destination=_lambda.LambdaDestination(lambda_function),
-            filter_pattern=logs.FilterPattern.all_events()
-        )
+        # log_group_name = "/aws/parallelcluster/get-log3-202310032109"
+        # log_group = logs.LogGroup.from_log_group_name(self, "ExistingLogGroup", log_group_name)
+        # log_group.add_subscription_filter(
+        #     "LambdaSubscriptionFilter",
+        #     destination=LambdaDestination(lambda_function),
+        #     filter_pattern=logs.FilterPattern.all_events()
+        # )
