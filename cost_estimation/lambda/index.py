@@ -1,3 +1,13 @@
+# uncomment the following line in the lambda console to run tests
+
+# import sys
+# import subprocess
+#
+# subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
+#                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# sys.path.insert(1, '/tmp/')
+# from opensearchpy import OpenSearch, RequestsHttpConnection
+
 import base64
 import datetime
 import json
@@ -7,10 +17,11 @@ import os
 import re
 import zlib
 
-import botocore.session
 import requests
 from botocore.auth import SigV4Auth
+import botocore.session
 from botocore.awsrequest import AWSRequest
+from requests import get
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -68,8 +79,7 @@ def transform(payload):
         source = build_source(log_event["message"], log_event.get("extractedFields", None))
         logger.info("Build the node mapping")
         if source.get("event-type") == "scontrol-show-job-information":
-            source = process_job_info(source)
-
+            source = process_job_info(source, existing_node_map=None)
         source["id"] = log_event["id"]
         source["timestamp"] = timestamp
         source["message"] = log_event["message"]
@@ -86,29 +96,20 @@ def transform(payload):
     return bulk_request_body
 
 
-def process_job_info(source):
+def fetch_latest_node_mapping():
+    """
+    Fetch the latest node-instance-mapping-event from OpenSearch.
+    """
     query = {
         "size": 1,
         "query": {"match": {"event-type.keyword": "node-instance-mapping-event"}},
         "sort": [{"datetime": {"order": "desc"}}],
     }
     response = json.loads(get(query).text)
-    node_name = source["detail"]["node_list"]
-    node_name_list = get_node_list(node_name)
-    node_map = response["hits"]["hits"][0]["_source"]["detail"]["node_list"]
-    nodes = []
-    node_list = source["detail"]["nodes"]
-    cpu_ids_list = source["detail"]["cpu_ids"]
-    gres_list = source["detail"]["gres"]
-    node_dict = get_node_dict(node_list, cpu_ids_list, gres_list, node_map)
-    for node in node_name_list:
-        nodes.append(node_dict[node])
-    source["detail"]["nodes"] = nodes
-    del source["detail"]["node_list"]
-    return source
+    return response["hits"]["hits"][0]["_source"]["detail"]["node_list"]
 
 
-def get_node_list(node_names):
+def convert_node_names_to_list(node_names):
     """
     Convert node_names to a list of nodes.
 
@@ -116,13 +117,16 @@ def get_node_list(node_names):
     Example output [queue1-st-c5xlarge-1, queue1-st-c5xlarge-3, queue1-st-c5xlarge-4, queue1-st-c5xlarge-5,
     queue1-st-c5large-20]
     """
-    matches = []
-    if type(node_names) is str:
-        matches = re.findall(r"((([a-z0-9\-]+)-(st|dy)-([a-z0-9\-]+)-)(\[[\d+,-]+\]|\d+))(,|$)", node_names)
-        # [('queue1-st-c5xlarge-[1,3,4-5]', 'queue1-st-c5xlarge-', 'queue1', 'st', 'c5xlarge', '[1,3,4-5]'),
-        # ('queue1-st-c5large-20', 'queue1-st-c5large-', 'queue1', 'st', 'c5large', '20')]
+    if not isinstance(node_names, str):
+        logger.error("Invalid input: node_names is not a string")
+        return []
+
+    matches = re.findall(r"((([a-z0-9\-]+)-(st|dy)-([a-z0-9\-]+)-)(\[[\d+,-]+\]|\d+))(,|$)", node_names)
+    # [('queue1-st-c5xlarge-[1,3,4-5]', 'queue1-st-c5xlarge-', 'queue1', 'st', 'c5xlarge', '[1,3,4-5]'),
+    # ('queue1-st-c5large-20', 'queue1-st-c5large-', 'queue1', 'st', 'c5large', '20')]
     node_list = []
     if not matches:
+        logger.error("Invalid Node Name Error")
         print("Invalid Node Name Error")
     for match in matches:
         node_name, prefix, _, _, _, nodes, _ = match
@@ -134,7 +138,9 @@ def get_node_list(node_names):
             try:
                 node_range = convert_range_to_list(nodes.strip("[]"))
             except ValueError:
+                logger.error("Invalid Node Name Error")
                 print("Invalid Node Name Error")
+                continue
             node_list += [prefix + str(n) for n in node_range]
     return node_list
 
@@ -155,13 +161,13 @@ def convert_range_to_list(node_range):
     )
 
 
-def get_node_dict(node_list, cpu_ids_list, gres_list, node_map):
+def build_node_dict(node_list, cpu_ids_list, gres_list, node_map):
     node_name_dict = {}
     for node in node_map:
         name = node["node_name"]
         node_name_dict[name] = node
     for i in range(len(node_list)):
-        node_names = get_node_list(node_list[i])
+        node_names = convert_node_names_to_list(node_list[i])
         cpu_ids = cpu_ids_list[i]
         gres = None
         for node_name in node_names:
@@ -197,6 +203,34 @@ def get_cpu_num(cpu_ids):
         split = cpu_ids.split("-")
         return int(split[1]) - int(split[0]) + 1
     return 1
+
+
+def process_job_info(source, existing_node_map=None):
+    """
+    Process job information with node-instance-mapping.
+    """
+    if existing_node_map is None:
+        node_map = fetch_latest_node_mapping()
+    else:
+        node_map = existing_node_map
+
+    if "detail" not in source or "node_list" not in source["detail"]:
+        logger.error("Source is missing required fields")
+        return source
+
+    node_name_list = convert_node_names_to_list(source["detail"]["node_list"])
+    nodes = []
+    node_list = source["detail"].get("nodes", [])
+    cpu_ids_list = source["detail"].get("cpu_ids", [])
+    gres_list = source["detail"].get("gres", [])
+    node_dict = build_node_dict(node_list, cpu_ids_list, gres_list, node_map)
+
+    for node in node_name_list:
+        nodes.append(node_dict.get(node, {}))
+
+    source["detail"]["nodes"] = nodes
+    del source["detail"]["node_list"]
+    return source
 
 
 def build_source(message, extracted_fields):
@@ -269,6 +303,6 @@ def post(body):
 
 def get(query):
     data = json.dumps(query)
-    endpoint_for_get = endpoint + "/cwl-2023.09.*/_search"
+    endpoint_for_get = endpoint + "/cwl-*/_search"
     response = make_request("GET", endpoint_for_get, data)
     return response

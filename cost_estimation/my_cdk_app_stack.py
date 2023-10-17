@@ -5,6 +5,7 @@ from aws_cdk import aws_lambda as _lambda
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_secretsmanager as sm
+from aws_cdk import aws_s3 as s3
 
 
 class MyCdkAppStack(cdk.Stack):
@@ -77,8 +78,11 @@ class MyCdkAppStack(cdk.Stack):
             self,
             "push-log",
             role=role,
-            code=_lambda.Code.from_asset(os.path.join(os.path.dirname("index.py"), "lambda")),
-            runtime=_lambda.Runtime.PYTHON_3_8,
+            # this method does not work because the lambda code needs a module named request
+            # code=_lambda.Code.from_asset(os.path.join(os.path.dirname("index.py"), "lambda")),
+            code=_lambda.Code.from_bucket(bucket=s3.Bucket.from_bucket_name(self, "Bucket", "log-lambda-func"),
+                                          key="lambda_package.zip"),
+            runtime=_lambda.Runtime.PYTHON_3_9,
             handler="index.lambda_handler",
             environment={
                 "SECRET_NAME": secret.secret_name,
