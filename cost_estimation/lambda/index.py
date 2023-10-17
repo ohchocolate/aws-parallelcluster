@@ -21,219 +21,61 @@ import requests
 from botocore.auth import SigV4Auth
 import botocore.session
 from botocore.awsrequest import AWSRequest
-from requests import get
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 session = botocore.session.Session()
 sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
 
-# endpoint = os.environ["OPENSEARCH_ENDPOINT"]
+# ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
 
 # original end point
-endpoint = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
+ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
 
-logFailedResponses = False
+LOG_FAILED_RESPONSES = False
 
 
 def lambda_handler(event, context):
-    compressed_payload = base64.b64decode(event['awslogs']['data'])
-    uncompressed_payload = zlib.decompress(compressed_payload, 16 + zlib.MAX_WBITS)
-
-    payload = json.loads(uncompressed_payload)
-
-    bulk_data = transform(payload)
-    logger.info(f"Transformed bulk data: {bulk_data}")
-
-    if not bulk_data:
-        print('Received a control message')
-        return {'statusCode': 200, 'body': 'Control message handled successfully'}
-
-    response = post(bulk_data)
-    logging.info(f"OpenSearch response status: {response.status_code}, content: {response.json()}")
-
-    if response.status_code == 200:
-        print('Success:', response.json())
-        return {'statusCode': 200, 'body': 'Success'}
-    else:
-        if logFailedResponses:
-            print('Error:', response.json())
-        return {'statusCode': 500, 'body': 'Failed to post to OpenSearch'}
-
-
-def transform(payload):
-    if payload["messageType"] == "CONTROL_MESSAGE":
-        return None
-    bulk_request_body = ""
-    for log_event in payload["logEvents"]:
-        # Build a ISO 8610 timestamp
-        timestamp = datetime.datetime.fromtimestamp(log_event["timestamp"] / 1000.0).isoformat() + 'Z'
-        # logger timestamp to debug
-        logger.info(f"Timestamp for log event {log_event['id']}: {timestamp}")
-        index_name = timestamp[:10].split("-")
-        index_name = "cwl-" + ".".join(index_name)
-
-        source = build_source(log_event["message"], log_event.get("extractedFields", None))
-        logger.info("Build the node mapping")
-        if source.get("event-type") == "scontrol-show-job-information":
-            source = process_job_info(source, existing_node_map=None)
-        source["id"] = log_event["id"]
-        source["timestamp"] = timestamp
-        source["message"] = log_event["message"]
-        source["owner"] = payload["owner"]
-        source["log_group"] = payload["logGroup"]
-        source["log_stream"] = payload["logStream"]
-
-        action = {"index": {}}
-        action["index"]["_index"] = index_name
-        action["index"]["_id"] = log_event["id"]
-
-        bulk_request_body += json.dumps(action) + "\n" + json.dumps(source) + "\n"
-
-    return bulk_request_body
-
-
-def fetch_latest_node_mapping():
     """
-    Fetch the latest node-instance-mapping-event from OpenSearch.
+    A function that processes CloudWatch log events and forwards them to an OpenSearch domain
+    :param event: The CloudWatch log event.
+    :param context: The AWS Lambda context object.
+    :return: A response object with 'statusCode' and 'body' fields.
     """
-    query = {
-        "size": 1,
-        "query": {"match": {"event-type.keyword": "node-instance-mapping-event"}},
-        "sort": [{"datetime": {"order": "desc"}}],
-    }
-    response = json.loads(get(query).text)
-    # what is the response?
-    logger.info(response)
-    print(response)
-    return response
+    try:
+        compressed_payload = base64.b64decode(event['awslogs']['data'])
+        uncompressed_payload = zlib.decompress(compressed_payload, 16 + zlib.MAX_WBITS)
+        payload = json.loads(uncompressed_payload)
+        bulk_data = transform(payload)
 
+        if not bulk_data:
+            logger.info('Received a control message')
+            return {'statusCode': 200, 'body': 'Control message handled successfully'}
 
-def convert_node_names_to_list(node_names):
-    """
-    Convert node_names to a list of nodes.
+        response = post(bulk_data)
+        logging.info(f"OpenSearch response status: {response.status_code}, content: {response.json()}")
 
-    Example input node_names: "queue1-st-c5xlarge-[1,3,4-5],queue1-st-c5large-20"
-    Example output [queue1-st-c5xlarge-1, queue1-st-c5xlarge-3, queue1-st-c5xlarge-4, queue1-st-c5xlarge-5,
-    queue1-st-c5large-20]
-    """
-    if not isinstance(node_names, str):
-        logger.error("Invalid input: node_names is not a string")
-        return []
-
-    matches = re.findall(r"((([a-z0-9\-]+)-(st|dy)-([a-z0-9\-]+)-)(\[[\d+,-]+\]|\d+))(,|$)", node_names)
-    # [('queue1-st-c5xlarge-[1,3,4-5]', 'queue1-st-c5xlarge-', 'queue1', 'st', 'c5xlarge', '[1,3,4-5]'),
-    # ('queue1-st-c5large-20', 'queue1-st-c5large-', 'queue1', 'st', 'c5large', '20')]
-    node_list = []
-    if not matches:
-        logger.error("Invalid Node Name Error")
-        print("Invalid Node Name Error")
-    for match in matches:
-        node_name, prefix, _, _, _, nodes, _ = match
-        if "[" not in nodes:
-            # Single node name
-            node_list.append(node_name)
+        if response.status_code == 200:
+            logger.info('Success:', response.json())
+            return {'statusCode': 200, 'body': 'Success'}
         else:
-            # Multiple node names
-            try:
-                node_range = convert_range_to_list(nodes.strip("[]"))
-            except ValueError:
-                logger.error("Invalid Node Name Error")
-                print("Invalid Node Name Error")
-                continue
-            node_list += [prefix + str(n) for n in node_range]
-    return node_list
-
-
-def convert_range_to_list(node_range):
-    """
-    Convert a number range to a list.
-
-    Example input: Input can be like one of the format: "1-3", "1-2,6", "2, 8"
-    Example output: [1, 2, 3]
-    """
-    return sum(
-        (
-            (list(range(*[int(j) + k for k, j in enumerate(i.split("-"))])) if "-" in i else [int(i)])
-            for i in node_range.split(",")
-        ),
-        [],
-    )
-
-
-def build_node_dict(node_list, cpu_ids_list, gres_list, node_map):
-    node_name_dict = {}
-    for node in node_map:
-        name = node["node_name"]
-        node_name_dict[name] = node
-    for i in range(len(node_list)):
-        node_names = convert_node_names_to_list(node_list[i])
-        cpu_ids = cpu_ids_list[i]
-        gres = None
-        for node_name in node_names:
-            node_info = node_name_dict[node_name]
-            node_info["cpu_ids"] = cpu_ids
-            if gres_list:
-                gres = gres_list[i]
-            cpu_usage = 0
-            if "," in cpu_ids:
-                cpu_ids_continuous_list = cpu_ids.split(",")
-                for cpu_ids_continuous in cpu_ids_continuous_list:
-                    cpu_usage += get_cpu_num(cpu_ids_continuous)
-            else:
-                cpu_usage = get_cpu_num(cpu_ids)
-            node_info["cpu_usage"] = cpu_usage
-            if gres:
-                gpu_ids = re.search(r"\((.*?):(\d+)\)", gres).group(2)
-                gpu_type_and_usage = gres[4:].split("(")[0]
-                node_info["gpu_ids"] = gpu_ids
-                node_info["gpu_type"] = gpu_type_and_usage.split(":")[0]
-                node_info["gpu_usage"] = gpu_type_and_usage.split(":")[1]
-            else:
-                node_info["gpu_ids"] = None
-                node_info["gpu_type"] = None
-                node_info["gpu_usage"] = 0
-            node_name_dict[node_name] = node_info
-
-    return node_name_dict
-
-
-def get_cpu_num(cpu_ids):
-    if "-" in cpu_ids:
-        split = cpu_ids.split("-")
-        return int(split[1]) - int(split[0]) + 1
-    return 1
-
-
-def process_job_info(source, existing_node_map=None):
-    """
-    Process job information with node-instance-mapping.
-    """
-    if existing_node_map is None:
-        node_map = fetch_latest_node_mapping()
-    else:
-        node_map = existing_node_map
-
-    if "detail" not in source or "node_list" not in source["detail"]:
-        logger.error("Source is missing required fields")
-        return source
-
-    node_name_list = convert_node_names_to_list(source["detail"]["node_list"])
-    nodes = []
-    node_list = source["detail"].get("nodes", [])
-    cpu_ids_list = source["detail"].get("cpu_ids", [])
-    gres_list = source["detail"].get("gres", [])
-    node_dict = build_node_dict(node_list, cpu_ids_list, gres_list, node_map)
-
-    for node in node_name_list:
-        nodes.append(node_dict.get(node, {}))
-
-    source["detail"]["nodes"] = nodes
-    del source["detail"]["node_list"]
-    return source
+            if LOG_FAILED_RESPONSES:
+                logger.error('Error:', response.json())
+            return {'statusCode': 500, 'body': 'Failed to post to OpenSearch'}
+    except Exception as e:
+        logger.error(f"Error processing lambda: {e}")
+        return {'statusCode': 500, 'body': str(e)}
 
 
 def build_source(message, extracted_fields):
+    """
+    Construct the source object for OpenSearch based on the log message
+    and any extracted fields.
+    :param message: The log message.
+    :param extracted_fields: Fields extracted from the log message.
+    :return: The constructed source object.
+    """
+
     if extracted_fields:
         source = {}
         for key in extracted_fields:
@@ -258,6 +100,11 @@ def build_source(message, extracted_fields):
 
 
 def extract_json(message):
+    """
+    Extract a JSON substring from a given message.
+    :param message: The message string containing potential JSON data.
+    :return: The extracted JSON substring or None if not found.
+    """
     json_start = message.index("{")
     if json_start < 0:
         return None
@@ -268,6 +115,11 @@ def extract_json(message):
 
 
 def is_valid_json(message):
+    """
+    Check if the given message is a valid JSON string.
+    :param message: The message string to check.
+    :return: True if valid JSON, False otherwise.
+    """
     try:
         json.loads(message)
         return True
@@ -275,7 +127,50 @@ def is_valid_json(message):
         return False
 
 
+def transform(payload):
+    """
+    Transform the CloudWatch log payload into a format suitable for
+    bulk indexing in OpenSearch.
+    :param payload: The CloudWatch log payload.
+    :return: The transformed data in bulk request format.
+    """
+    if payload["messageType"] == "CONTROL_MESSAGE":
+        return None
+    bulk_request_body = ""
+    for log_event in payload["logEvents"]:
+        # Build a ISO 8610 timestamp
+        timestamp = datetime.datetime.fromtimestamp(log_event["timestamp"] / 1000.0).isoformat() + 'Z'
+        # logger timestamp to debug
+        logger.info(f"Timestamp for log event {log_event['id']}: {timestamp}")
+        index_name = timestamp[:10].split("-")
+        index_name = "cwl-" + ".".join(index_name)
+
+        source = build_source(log_event["message"], log_event.get("extractedFields", None))
+        source["id"] = log_event["id"]
+        source["timestamp"] = timestamp
+        source["message"] = log_event["message"]
+        source["owner"] = payload["owner"]
+        source["log_group"] = payload["logGroup"]
+        source["log_stream"] = payload["logStream"]
+
+        action = {"index": {}}
+        action["index"]["_index"] = index_name
+        action["index"]["_id"] = log_event["id"]
+
+        bulk_request_body += json.dumps(action) + "\n" + json.dumps(source) + "\n"
+
+    return bulk_request_body
+
+
 def make_request(method, endpoint, data=None):
+    """
+    Make a signed request to the OpenSearch domain.
+    :param method: The HTTP method.
+    :param endpoint: The OpenSearch endpoint URL.
+    :param data: The request payload.
+    :return: The response object from the OpenSearch request.
+    """
+
     logger.info(f"Making {method} request to {endpoint} with data: {data}")
     headers = {"Content-Type": "application/json"}
 
@@ -295,14 +190,14 @@ def make_request(method, endpoint, data=None):
 
 
 def post(body):
+    """
+    Post the transformed log data to the OpenSearch domain.
+    :param body: The bulk data to post to OpenSearch.
+    :return: The response object from the OpenSearch post request.
+    """
     logger.info(f"Posting data: {body}")
-    endpoint_for_post = endpoint + "/_bulk"
+    endpoint_for_post = ENDPOINT + "/_bulk"
     response = make_request("POST", endpoint_for_post, body)
     return response
 
 
-def get(query):
-    data = json.dumps(query)
-    endpoint_for_get = endpoint + "/cwl-*/_search"
-    response = make_request("GET", endpoint_for_get, data)
-    return response
