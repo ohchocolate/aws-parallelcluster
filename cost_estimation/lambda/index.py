@@ -28,22 +28,19 @@ logger.setLevel(logging.INFO)
 session = botocore.session.Session()
 sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
 
-endpoint = os.environ["OPENSEARCH_ENDPOINT"]
+# endpoint = os.environ["OPENSEARCH_ENDPOINT"]
 
 # original end point
-# endpoint = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
+endpoint = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
 
 logFailedResponses = False
 
 
 def lambda_handler(event, context):
-    logger.info(f"Received event: {json.dumps(event)}")
     compressed_payload = base64.b64decode(event['awslogs']['data'])
     uncompressed_payload = zlib.decompress(compressed_payload, 16 + zlib.MAX_WBITS)
-    logger.info(f"Uncompressed payload: {uncompressed_payload}")
 
     payload = json.loads(uncompressed_payload)
-    logger.info(f"JSON payload: {json.dumps(payload)}")
 
     bulk_data = transform(payload)
     logger.info(f"Transformed bulk data: {bulk_data}")
@@ -106,7 +103,10 @@ def fetch_latest_node_mapping():
         "sort": [{"datetime": {"order": "desc"}}],
     }
     response = json.loads(get(query).text)
-    return response["hits"]["hits"][0]["_source"]["detail"]["node_list"]
+    # what is the response?
+    logger.info(response)
+    print(response)
+    return response
 
 
 def convert_node_names_to_list(node_names):
