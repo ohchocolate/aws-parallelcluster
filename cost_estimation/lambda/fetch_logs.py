@@ -32,9 +32,11 @@ def lambda_handler(event, context):
     logger.info("The body/detail of nodes log")
     logger.info(nodes_detail)
     jobs_cost = calculate_cost(nodes_detail, jobs_detail)
+    # jobs cost is a dictionary {job_id : cost}
     logger.info(jobs_cost)
 
     # push costs to OpenSearch
+    # TODO: Get and store the document id for a job
     # add_estimated_cost(ENDPOINT, document_id, calculated_cost)
     # Mark the documents as processed after processing
     mark_documents_as_processed(ENDPOINT, "scontrol-show-job-information")
@@ -149,6 +151,7 @@ def add_estimated_cost(endpoint, document_id, calculated_cost):
             'statusCode': e.response.status_code,
             'body': f"Failed to add the estimated cost: {e.response.text}"
         }
+
 
 def mark_documents_as_processed(endpoint, event_type):
     """
