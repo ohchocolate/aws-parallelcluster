@@ -20,23 +20,22 @@ ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazon
 
 
 def lambda_handler(event, context):
-    print("Lambda function triggered!")
-
     # fetch job info
     # a dict: {'statusCode': int, 'body': str}
     jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
-    jobs_data = extract_data_from_response(jobs_log['body'])
-    logger.info("What is current jobs data?")
-    logger.info(jobs_data)
+    jobs_detail = extract_data_from_response(jobs_log['body'])
+    logger.info("The body/detail of jobs log")
+    logger.info(jobs_detail)
     # fetch node mapping
     nodes_log = search_data(ENDPOINT, "node-instance-mapping-event")
-    nodes_data = extract_data_from_response(nodes_log['body'])
-    logger.info("What is current nodes data?")
-    logger.info(nodes_data)
-    jobs_cost = calculate_cost(nodes_data, jobs_data)
+    nodes_detail = extract_data_from_response(nodes_log['body'])
+    logger.info("The body/detail of nodes log")
+    logger.info(nodes_detail)
+    jobs_cost = calculate_cost(nodes_detail, jobs_detail)
     logger.info(jobs_cost)
+
     # push costs to OpenSearch
-    # mark records as processed
+    # add_estimated_cost(ENDPOINT, document_id, calculated_cost)
     # Mark the documents as processed after processing
     mark_documents_as_processed(ENDPOINT, "scontrol-show-job-information")
     mark_documents_as_processed(ENDPOINT, "node-instance-mapping-event")
@@ -48,10 +47,6 @@ def extract_data_from_response(response_body):
     hits = parsed_response.get('hits', {}).get('hits', [])
     logger.info("What are the hits?")
     logger.info(hits)
-    # Debug: Print all the _source data to verify its content
-    all_sources = [hit["_source"] for hit in hits]
-    logger.info("All sources in a hit")
-    logger.info(all_sources)
     extracted_data = [hit["_source"]["detail"] for hit in hits if "detail" in hit["_source"]]
     logger.info("See the extracted data below")
     logger.info("Extracted data: %s", extracted_data)
@@ -117,9 +112,50 @@ def calculate_cost(nodes_data, jobs_data):
     return total_costs
 
 
+def add_estimated_cost(endpoint, document_id, calculated_cost):
+    """
+    Push calculated cost for a specific job to OpenSearch
+    :param endpoint:
+    :param calculated_cost:
+    :return:
+    """
+    session = botocore.session.Session()
+    sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
+    path = f"/your-index-name/_update/{document_id}"
+    url = endpoint + path
+    # TODO: query to update a field in OpenSearch
+    query = {
+
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+    request = AWSRequest(method="POST", url=url, data=json.dumps(query), headers=headers)
+    sigv4.add_auth(request)
+    prepped_request = request.prepare()
+
+    # Send the request
+    try:
+        response = requests.post(url, headers=prepped_request.headers, data=prepped_request.body)
+        response.raise_for_status()
+        logger.info("Successfully added the estimated cost")
+        return {
+            'statusCode': 200,
+            'body': json.dumps(response.json())
+        }
+    except requests.HTTPError as e:
+        logger.error("Failed to add the estimated cost")
+        return {
+            'statusCode': e.response.status_code,
+            'body': f"Failed to add the estimated cost: {e.response.text}"
+        }
+
 def mark_documents_as_processed(endpoint, event_type):
     """
     Marks the documents with the specified event-type as processed in OpenSearch.
+    :param endpoint:
+    :param event_type:
+    :return:
     """
     session = botocore.session.Session()
     sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
@@ -133,6 +169,7 @@ def mark_documents_as_processed(endpoint, event_type):
             }
         },
         "script": {
+            # ref: https://opensearch.org/docs/1.3/api-reference/document-apis/update-by-query/
             "source": "ctx._source.processed = true"
         }
     }
