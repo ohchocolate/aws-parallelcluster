@@ -20,28 +20,38 @@ ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazon
 
 
 def lambda_handler(event, context):
-    # fetch job info
-    # a dict: {'statusCode': int, 'body': str}
-    jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
-    jobs_detail = extract_data_from_response(jobs_log['body'])
-    logger.info("The body/detail of jobs log")
-    logger.info(jobs_detail)
-    # fetch node mapping
-    nodes_log = search_data(ENDPOINT, "node-instance-mapping-event")
-    nodes_detail = extract_data_from_response(nodes_log['body'])
-    logger.info("The body/detail of nodes log")
-    logger.info(nodes_detail)
-    jobs_cost = calculate_cost(nodes_detail, jobs_detail)
-    # jobs cost is a dictionary {job_id : cost}
-    logger.info(jobs_cost)
-
-    # push costs to OpenSearch
-    # TODO: Get and store the document id for a job
-    # add_estimated_cost(ENDPOINT, document_id, calculated_cost)
-    # Mark the documents as processed after processing
-    mark_documents_as_processed(ENDPOINT, "scontrol-show-job-information")
-    mark_documents_as_processed(ENDPOINT, "node-instance-mapping-event")
-    return jobs_cost
+    try:
+        # fetch job info
+        # dict: {'statusCode': int, 'body': str}
+        jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
+        jobs_detail = extract_data_from_response(jobs_log['body'])
+        logger.info("The body/detail of jobs log")
+        logger.info(jobs_detail)
+        # fetch node mapping
+        nodes_log = search_data(ENDPOINT, "node-instance-mapping-event")
+        nodes_detail = extract_data_from_response(nodes_log['body'])
+        logger.info("The body/detail of nodes log")
+        logger.info(nodes_detail)
+        # jobs cost is a dictionary {job_id : cost}
+        jobs_cost = calculate_cost(nodes_detail, jobs_detail)
+        # jobs cost is a dictionary {job_id : cost}
+        logger.info(jobs_cost)
+        logger.info("Build a list with all job related info")
+        job_detail_with_cost = build_job_index(jobs_detail, jobs_cost)
+        logger.info("Job detail with cost:")
+        logger.info(job_detail_with_cost)
+        # push costs to OpenSearch
+        response = post_estimated_cost_to_opensearch(ENDPOINT, job_detail_with_cost)
+        return {
+            'statusCode': 200,
+            'body': 'Successfully processed jobs and updated estimated costs in OpenSearch.'
+        }
+    except Exception as e:
+        logger.error(f"Error processing the Lambda: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': f"Error processing the Lambda: {str(e)}"
+        }
 
 
 def extract_data_from_response(response_body):
@@ -76,6 +86,7 @@ def calculate_cost(nodes_data, jobs_data):
     total_costs = {}
 
     for job in jobs_data:
+        logger.info(f"Processing job: {job}")
         if job.get("job_state") != "running":
             continue
 
@@ -114,25 +125,34 @@ def calculate_cost(nodes_data, jobs_data):
     return total_costs
 
 
-def add_estimated_cost(endpoint, document_id, calculated_cost):
+def build_job_index(jobs_detail, jobs_cost):
+
+    for job in jobs_detail:
+        job_id = job['detail']['job_id']
+        if job_id in jobs_cost:
+            # set a default value for job id without estimated cost
+            job['detail']['estimated costs'] = jobs_cost.get(job_id, "N/A")
+    # return a list that I can later push to open search as a new index
+    return jobs_detail
+
+
+def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     """
-    Push calculated cost for a specific job to OpenSearch
+    Push calculated cost and related information for a specific job to OpenSearch
     :param endpoint:
-    :param calculated_cost:
+    :param job_detail_with_cost: A list containing job details and its estimated cost
     :return:
     """
     session = botocore.session.Session()
     sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
-    path = f"/your-index-name/_update/{document_id}"
+    # name the new index as jobs_estimated_costs
+    path = "/jobs_estimated_costs/_doc/"
     url = endpoint + path
-    # TODO: query to update a field in OpenSearch
-    query = {
 
-    }
     headers = {
         "Content-Type": "application/json"
     }
-    request = AWSRequest(method="POST", url=url, data=json.dumps(query), headers=headers)
+    request = AWSRequest(method="POST", url=url, data=json.dumps(job_detail_with_cost), headers=headers)
     sigv4.add_auth(request)
     prepped_request = request.prepare()
 
@@ -140,6 +160,12 @@ def add_estimated_cost(endpoint, document_id, calculated_cost):
     try:
         response = requests.post(url, headers=prepped_request.headers, data=prepped_request.body)
         response.raise_for_status()
+
+        # Mark the documents as processed only if successfully added to OpenSearch
+        mark_documents_as_processed(ENDPOINT, "scontrol-show-job-information")
+        mark_documents_as_processed(ENDPOINT, "node-instance-mapping-event")
+        logger.info("Mark documents as processed ")
+
         logger.info("Successfully added the estimated cost")
         return {
             'statusCode': 200,
