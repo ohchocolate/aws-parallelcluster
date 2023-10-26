@@ -46,6 +46,7 @@ def lambda_handler(event, context):
         compressed_payload = base64.b64decode(event['awslogs']['data'])
         uncompressed_payload = zlib.decompress(compressed_payload, 16 + zlib.MAX_WBITS)
         payload = json.loads(uncompressed_payload)
+        logger.info(f"Processing payload: {payload}")
         bulk_data = transform(payload)
 
         if not bulk_data:
@@ -75,9 +76,15 @@ def build_source(message, extracted_fields):
     :param extracted_fields: Fields extracted from the log message.
     :return: The constructed source object.
     """
+    source = {}
+
+    # Check if the message is a valid JSON
+    if is_valid_json(message):
+        json_substring = extract_json(message)
+        if json_substring:
+            return json.loads(json_substring)
 
     if extracted_fields:
-        source = {}
         for key in extracted_fields:
             if extracted_fields.hasOwnProperty(key) and extracted_fields[key]:
                 value = extracted_fields[key]
@@ -86,17 +93,12 @@ def build_source(message, extracted_fields):
                     source[key] = 1 * value
                     continue
 
-            json_substring = extract_json(value)
-            if json_substring:
-                source["$" + key] = json.loads(json_substring)
+                json_substring = extract_json(value)
+                if json_substring:
+                    source["$" + key] = json.loads(json_substring)
 
-            source[key] = value
+                source[key] = value
         return source
-    if is_valid_json(message):
-        json_substring = extract_json(message)
-        if json_substring:
-            return json.loads(json_substring)
-    return {}
 
 
 def extract_json(message):
@@ -140,12 +142,60 @@ def transform(payload):
     for log_event in payload["logEvents"]:
         # Build a ISO 8610 timestamp
         timestamp = datetime.datetime.fromtimestamp(log_event["timestamp"] / 1000.0).isoformat() + 'Z'
-        # logger timestamp to debug
-        logger.info(f"Timestamp for log event {log_event['id']}: {timestamp}")
         index_name = timestamp[:10].split("-")
         index_name = "cwl-" + ".".join(index_name)
-
         source = build_source(log_event["message"], log_event.get("extractedFields", None))
+        # A test case
+        # source = {
+        #     "datetime": "2023-10-26T05:33:57.311+00:00",
+        #     "version": 0,
+        #     "scheduler": "slurm",
+        #     "cluster-name": "get-log9",
+        #     "node-role": "HeadNode",
+        #     "component": "clusterjobinfomgtd",
+        #     "level": "INFO",
+        #     "instance-id": "i-03aaf121e1e6eb149",
+        #     "event-type": "scontrol-show-job-information",
+        #     "message": "Job information from scontrol",
+        #     "detail": {
+        #         "job_id": "12",
+        #         "job_name": "wrap",
+        #         "user_id": "ec2-user(1000)",
+        #         "account": "(null)",
+        #         "job_state": "COMPLETED",
+        #         "run_time": "00:00:11",
+        #         "start_time": "2023-10-26T05:31:16.000+00:00",
+        #         "end_time": "2023-10-26T05:31:27.000+00:00",
+        #         "partition": "queue1",
+        #         "node_list": "queue1-st-t2micro-1,queue1-st-t2xlarge-[1-2]",
+        #         "nodes": [
+        #             "queue1-st-t2micro-1",
+        #             "queue1-st-t2xlarge-1",
+        #             "queue1-st-t2xlarge-2"
+        #         ],
+        #         "cpu_ids": [
+        #             "0",
+        #             "0-3",
+        #             "0"
+        #         ],
+        #         "gres": []
+        #     }
+        # }
+        logger.info(f"Processing source {source}")
+        if source is None:
+            logger.info("Skipping log event due to empty source: {}".format(log_event["message"]))
+            continue
+        if "event-type" in source:
+            logger.info(f"Event-type detected: {source['event-type']}")
+            if source.get("event-type") not in ["scontrol-show-job-information", "node-instance-mapping-event"]:
+                continue
+        if source.get("event-type") == "scontrol-show-job-information":
+            logger.info("Handling scontrol-show-job-information event type")
+            if 'node_list' in source["detail"]:
+                logger.info(f"Original node_list value: {source['detail']['node_list']}")
+                source['detail']['node_list_string'] = source['detail']['node_list']
+                del source['detail']['node_list']
+                logger.info("Renamed node_list to node_list_string in detail")
         source["id"] = log_event["id"]
         source["timestamp"] = timestamp
         source["message"] = log_event["message"]
