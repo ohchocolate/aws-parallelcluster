@@ -21,25 +21,26 @@ ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazon
 
 def lambda_handler(event, context):
     try:
-        # fetch job info
+        # fetch job info10.
         # dict: {'statusCode': int, 'body': str}
         jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
         jobs_detail = extract_data_from_response(jobs_log['body'])
-        logger.info("The body/detail of jobs log")
+        logger.info("The extracted_data_list of jobs log")
         logger.info(jobs_detail)
         # fetch node mapping
         nodes_log = search_data(ENDPOINT, "node-instance-mapping-event")
         nodes_detail = extract_data_from_response(nodes_log['body'])
-        logger.info("The body/detail of nodes log")
+        logger.info("The extracted_data_list of nodes log")
         logger.info(nodes_detail)
         # jobs cost is a dictionary {job_id : cost}
         jobs_cost = calculate_cost(nodes_detail, jobs_detail)
         # jobs cost is a dictionary {job_id : cost}
         logger.info(jobs_cost)
-        logger.info("Build a list with all job related info")
-        job_detail_with_cost = build_job_index(jobs_detail, jobs_cost)
-        logger.info("Job detail with cost:")
-        logger.info(job_detail_with_cost)
+        job_detail_with_cost = []
+        for job in jobs_detail:
+            combined_id = job["combined_id"]
+            job["estimated_cost"] = jobs_cost.get(combined_id, 0)
+            job_detail_with_cost.append(job)
         # push costs to OpenSearch
         response = post_estimated_cost_to_opensearch(ENDPOINT, job_detail_with_cost)
         return {
@@ -55,23 +56,44 @@ def lambda_handler(event, context):
 
 
 def extract_data_from_response(response_body):
+    logger.info("start extracting...")
     parsed_response = json.loads(response_body)
     hits = parsed_response.get('hits', {}).get('hits', [])
-    logger.info("What are the hits?")
-    logger.info(hits)
-    extracted_data = [hit["_source"]["detail"] for hit in hits if "detail" in hit["_source"]]
-    logger.info("See the extracted data below")
-    logger.info("Extracted data: %s", extracted_data)
-    print(extracted_data)
-    return extracted_data
+    extracted_data_list = []
+    for hit in hits:
+        if "detail" in hit["_source"]:
+            detail = hit["_source"]["detail"]
+            cluster = hit["_source"]["cluster-name"]
+            if "job_id" in detail:
+                combined_id = f"{cluster}_{detail['job_id']}"
+                extracted_data = {
+                    "cluster_name": cluster,
+                    "combined_id": combined_id,
+                    "detail": detail
+                }
+                extracted_data_list.append(extracted_data)
+            else:
+                extracted_data = {
+                    "cluster_name": cluster,
+                    "detail": detail
+                }
+            extracted_data_list.append(extracted_data)
+
+    logger.info("Extracted data: %s", extracted_data_list)
+    return extracted_data_list
 
 
 def get_instance_cost(instance_type):
-    # Dummy data for testing
+    # Reference: https://aws.amazon.com/ec2/instance-types/t2/
     # In the real scenario, we may need to call an API
     costs = {
-        "t2.micro": 0.02,  # cost per hour in USD
-        "t3.large": 0.05
+        "t2.nano": 0.01,
+        "t2.micro": 0.01,
+        "t2.small": 0.02,
+        "t2.medium": 0.05,
+        "t2.large": 0.09,
+        "t2.xlarge": 0.19,
+        "t2.2xlarge": 0.37
     }
     return costs.get(instance_type, 0)
 
@@ -82,34 +104,70 @@ def calculate_runtime_in_minutes(run_time):
     return hours * 60 + minutes + seconds / 60
 
 
-def calculate_cost(nodes_data, jobs_data):
+def get_total_cores(cpu_ids):
+    total_cores = 0
+    for cpu_id in cpu_ids:
+        if "-" in cpu_id:
+            start, end = cpu_id.split("-")
+            if start.isdigit() and end.isdigit():
+                total_cores += int(end) - int(start) + 1
+        elif cpu_id.isdigit():
+            total_cores += 1
+    return total_cores
+
+
+def calculate_cost(nodes_detail, jobs_detail):
+    logger.info("Enter into the cost calculation")
     total_costs = {}
-
-    for job in jobs_data:
+    logger.info(f"Current nodes detail: {nodes_detail}")
+    for job_data in jobs_detail:
+        job = job_data["detail"]
+        combined_id = job_data["combined_id"]
         logger.info(f"Processing job: {job}")
-        if job.get("job_state") != "running":
-            continue
 
-        job_id = job["job_id"]
+        # TODO: Consider job_state: completed and running
+        # Temporary disable the constraint to calculate only the cost of a running job
+        # if job.get("job_state") != "running":
+        #     continue
+
         total_cost_for_job = 0
-
         # Calculate runtime in minutes for the current job
+        # TODO: Add condition to check the runtime in log before update the estimated cost
         job_runtime_minutes = calculate_runtime_in_minutes(job["run_time"])
 
-        for node_name, cpus in zip(job["nodes"], job["cpus"]):
-            node_detail = next((node for node in nodes_data if node["node_name"] == node_name), None)
+        current_cluster = job_data["cluster_name"]
 
+        cluster_nodes_detail = None
+        for node_cluster in nodes_detail:
+            if node_cluster["cluster_name"] == current_cluster:
+                cluster_nodes_detail = node_cluster["detail"]["node_list"]
+                break
+
+        if not cluster_nodes_detail:
+            logger.error(f"Could not find node details for cluster: {current_cluster}")
+            continue
+        logger.info(f"This is current cluster node detail: {cluster_nodes_detail}")
+        for node_name, cpu_ids in zip(job["nodes"], job["cpu_ids"]):
+            logger.info(f"Processing node name {node_name}")
+
+            node_detail = next((node for node in cluster_nodes_detail if node["node_name"] == node_name), None)
+            logger.info(f"This is current node detail {node_detail}")
             if not node_detail:
-                # This is an error scenario where we couldn't find the node detail.
+                logger.error(f"Could not find node details for node name: {node_name}")
                 continue
 
             # Calculate total vCPUs for the node
             total_vcpus = node_detail["threads_per_core"] * node_detail["core_count"]
-            print(f"This node {node_name} has the total of {total_vcpus} vcpus")
+            if total_vcpus == 0:
+                continue
+
+            # Calculate the number of used CPUs for the job on that node
+            used_cores = get_total_cores(cpu_ids)
+            logger.info(f"This is the used CPUs {used_cores} for node {node_name}")
 
             # Determine the CPU usage ratio for the job on that node
-            cpu_usage_ratio = int(cpus) / total_vcpus
-            print(f"This job {job_id} has {cpu_usage_ratio} cpu usage ratio of {node_name}")
+            cpu_usage_ratio = used_cores / total_vcpus
+            logger.info(f"This is the cpu usage ratio {cpu_usage_ratio}")
 
             # Fetch the cost per hour for that instance_type
             cost_per_hour = get_instance_cost(node_detail["instance_type"])
@@ -117,23 +175,18 @@ def calculate_cost(nodes_data, jobs_data):
             # Calculate the cost per minute and then for the job's runtime
             cost_per_minute = cost_per_hour / 60
             cost_for_node = cost_per_minute * job_runtime_minutes * cpu_usage_ratio
+            logger.info(f"This is the cost {cost_for_node} for node {node_name}")
 
             total_cost_for_job += cost_for_node
-
-        total_costs[job_id] = total_cost_for_job
+            # Round cost
+            rounded_cost_for_job = round(total_cost_for_job, 2)
+            logger.info(f"This is the total cost for job {combined_id}: {total_cost_for_job}")
+            logger.info(f"This is the rounded total cost for job {combined_id}: {total_cost_for_job}")
+        # cluster name + job id as the key
+        total_costs[combined_id] = rounded_cost_for_job
+        logger.info(f"Current total costs is {total_costs}")
 
     return total_costs
-
-
-def build_job_index(jobs_detail, jobs_cost):
-
-    for job in jobs_detail:
-        job_id = job['detail']['job_id']
-        if job_id in jobs_cost:
-            # set a default value for job id without estimated cost
-            job['detail']['estimated costs'] = jobs_cost.get(job_id, "N/A")
-    # return a list that I can later push to open search as a new index
-    return jobs_detail
 
 
 def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
@@ -146,19 +199,21 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     session = botocore.session.Session()
     sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
     # name the new index as jobs_estimated_costs
-    path = "/jobs_estimated_costs/_doc/"
+    path = "/estimated_costs/_doc/"
     url = endpoint + path
 
     headers = {
         "Content-Type": "application/json"
     }
     request = AWSRequest(method="POST", url=url, data=json.dumps(job_detail_with_cost), headers=headers)
+    logger.info(f"Sending request to {url} with data: {job_detail_with_cost}")
     sigv4.add_auth(request)
     prepped_request = request.prepare()
 
     # Send the request
     try:
         response = requests.post(url, headers=prepped_request.headers, data=prepped_request.body)
+        logger.info(f"Received response: {response.status_code} {response.text}")
         response.raise_for_status()
 
         # Mark the documents as processed only if successfully added to OpenSearch
@@ -175,7 +230,7 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
         logger.error("Failed to add the estimated cost")
         return {
             'statusCode': e.response.status_code,
-            'body': f"Failed to add the estimated cost: {e.response.text}"
+            'body': f"Failed to add the estimated cost: {e.response.status_code} {e.response.text}"
         }
 
 
@@ -261,8 +316,8 @@ def search_data(endpoint, event_type):
         logger.info("Query succeeded")
         # convert response to json
         results = response.json()
-        logger.info("See the response below")
-        print(results)
+        # logger.info("See the response below")
+        # print(results)
         return {
             'statusCode': 200,
             'body': json.dumps(results)
