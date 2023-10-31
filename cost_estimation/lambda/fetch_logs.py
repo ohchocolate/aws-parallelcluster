@@ -21,20 +21,15 @@ ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazon
 
 def lambda_handler(event, context):
     try:
-        # fetch job info10.
         # dict: {'statusCode': int, 'body': str}
         jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
         jobs_detail = extract_data_from_response(jobs_log['body'])
-        logger.info("The extracted_data_list of jobs log")
-        logger.info(jobs_detail)
-        # fetch node mapping
+        logger.info(f"The extracted_data_list of jobs log {jobs_detail}")
         nodes_log = search_data(ENDPOINT, "node-instance-mapping-event")
         nodes_detail = extract_data_from_response(nodes_log['body'])
-        logger.info("The extracted_data_list of nodes log")
-        logger.info(nodes_detail)
+        logger.info(f"The extracted_data_list of nodes log {nodes_detail}")
         # jobs cost is a dictionary {job_id : cost}
         jobs_cost = calculate_cost(nodes_detail, jobs_detail)
-        # jobs cost is a dictionary {job_id : cost}
         logger.info(jobs_cost)
         job_detail_with_cost = []
         for job in jobs_detail:
@@ -60,24 +55,40 @@ def extract_data_from_response(response_body):
     parsed_response = json.loads(response_body)
     hits = parsed_response.get('hits', {}).get('hits', [])
     extracted_data_list = []
+    instance_ids = set()
+    combined_ids = set()
+
     for hit in hits:
         if "detail" in hit["_source"]:
             detail = hit["_source"]["detail"]
             cluster = hit["_source"]["cluster-name"]
+
             if "job_id" in detail:
                 combined_id = f"{cluster}_{detail['job_id']}"
-                extracted_data = {
-                    "cluster_name": cluster,
-                    "combined_id": combined_id,
-                    "detail": detail
-                }
-                extracted_data_list.append(extracted_data)
+                if combined_id not in combined_ids:
+                    combined_ids.add(combined_id)
+                    extracted_data = {
+                        "cluster_name": cluster,
+                        "combined_id": combined_id,
+                        "detail": detail
+                    }
+                    extracted_data_list.append(extracted_data)
             else:
-                extracted_data = {
-                    "cluster_name": cluster,
-                    "detail": detail
-                }
-            extracted_data_list.append(extracted_data)
+                node_list = detail.get("node_list", [])
+                new_node_list = []
+                for node in node_list:
+                    instance_id = node.get("instance_id")
+                    if instance_id and instance_id not in instance_ids:
+                        instance_ids.add(instance_id)
+                        new_node_list.append(node)
+                if new_node_list:
+                    extracted_data = {
+                        "cluster_name": cluster,
+                        "detail": {
+                            "node_list": new_node_list
+                        }
+                    }
+                    extracted_data_list.append(extracted_data)
 
     logger.info("Extracted data: %s", extracted_data_list)
     return extracted_data_list
@@ -87,13 +98,20 @@ def get_instance_cost(instance_type):
     # Reference: https://aws.amazon.com/ec2/instance-types/t2/
     # In the real scenario, we may need to call an API
     costs = {
-        "t2.nano": 0.01,
-        "t2.micro": 0.01,
-        "t2.small": 0.02,
-        "t2.medium": 0.05,
-        "t2.large": 0.09,
-        "t2.xlarge": 0.19,
-        "t2.2xlarge": 0.37
+        # "t2.nano": 0.01,
+        # "t2.micro": 0.01,
+        # "t2.small": 0.02,
+        # "t2.medium": 0.05,
+        # "t2.large": 0.09,
+        # "t2.xlarge": 0.19,
+        # "t2.2xlarge": 0.37
+        "t2.nano": 1,
+        "t2.micro": 1,
+        "t2.small": 2,
+        "t2.medium": 5,
+        "t2.large": 9,
+        "t2.xlarge": 19,
+        "t2.2xlarge": 37
     }
     return costs.get(instance_type, 0)
 
@@ -125,13 +143,11 @@ def calculate_cost(nodes_detail, jobs_detail):
         combined_id = job_data["combined_id"]
         logger.info(f"Processing job: {job}")
 
-        # TODO: Consider job_state: completed and running
-        # Temporary disable the constraint to calculate only the cost of a running job
-        # if job.get("job_state") != "running":
-        #     continue
+        # Consider job_state: completed and running
+        if job.get("job_state") != "RUNNING" or job.get("job_state") != "COMPLETED":
+            continue
 
         total_cost_for_job = 0
-        # Calculate runtime in minutes for the current job
         # TODO: Add condition to check the runtime in log before update the estimated cost
         job_runtime_minutes = calculate_runtime_in_minutes(job["run_time"])
 
@@ -179,7 +195,7 @@ def calculate_cost(nodes_detail, jobs_detail):
 
             total_cost_for_job += cost_for_node
             # Round cost
-            rounded_cost_for_job = round(total_cost_for_job, 2)
+            rounded_cost_for_job = round(total_cost_for_job, 4)
             logger.info(f"This is the total cost for job {combined_id}: {total_cost_for_job}")
             logger.info(f"This is the rounded total cost for job {combined_id}: {total_cost_for_job}")
         # cluster name + job id as the key
@@ -199,14 +215,22 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     session = botocore.session.Session()
     sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
     # name the new index as jobs_estimated_costs
-    path = "/estimated_costs/_doc/"
+    path = "/estimated_cost/_bulk/"
     url = endpoint + path
 
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/x-ndjson"
     }
-    request = AWSRequest(method="POST", url=url, data=json.dumps(job_detail_with_cost), headers=headers)
-    logger.info(f"Sending request to {url} with data: {job_detail_with_cost}")
+
+    # Preparing bulk data
+    bulk_data = ''
+    for job in job_detail_with_cost:
+        # Use combined_id as document ID
+        action_metadata = {"index": {"_id": job["combined_id"]}}
+        bulk_data += json.dumps(action_metadata) + '\n' + json.dumps(job) + '\n'
+
+    request = AWSRequest(method="POST", url=url, data=bulk_data, headers=headers)
+    logger.info(f"Sending bulk request to {url}")
     sigv4.add_auth(request)
     prepped_request = request.prepare()
 
@@ -219,7 +243,7 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
         # Mark the documents as processed only if successfully added to OpenSearch
         mark_documents_as_processed(ENDPOINT, "scontrol-show-job-information")
         mark_documents_as_processed(ENDPOINT, "node-instance-mapping-event")
-        logger.info("Mark documents as processed ")
+        logger.info("Mark documents as processed")
 
         logger.info("Successfully added the estimated cost")
         return {
