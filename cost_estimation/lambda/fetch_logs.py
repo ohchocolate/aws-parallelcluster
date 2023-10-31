@@ -8,6 +8,8 @@
 
 import json
 import logging
+from datetime import datetime
+
 import botocore.session
 import requests
 from botocore.auth import SigV4Auth
@@ -21,6 +23,7 @@ ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazon
 
 def lambda_handler(event, context):
     try:
+        # TODO: CHECK IF THE DATA IS PROCESSED
         # dict: {'statusCode': int, 'body': str}
         jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
         jobs_detail = extract_data_from_response(jobs_log['body'])
@@ -28,20 +31,31 @@ def lambda_handler(event, context):
         nodes_log = search_data(ENDPOINT, "node-instance-mapping-event")
         nodes_detail = extract_data_from_response(nodes_log['body'])
         logger.info(f"The extracted_data_list of nodes log {nodes_detail}")
-        # jobs cost is a dictionary {job_id : cost}
-        jobs_cost = calculate_cost(nodes_detail, jobs_detail)
-        logger.info(jobs_cost)
-        job_detail_with_cost = []
-        for job in jobs_detail:
-            combined_id = job["combined_id"]
-            job["estimated_cost"] = jobs_cost.get(combined_id, 0)
-            job_detail_with_cost.append(job)
-        # push costs to OpenSearch
-        response = post_estimated_cost_to_opensearch(ENDPOINT, job_detail_with_cost)
-        return {
-            'statusCode': 200,
-            'body': 'Successfully processed jobs and updated estimated costs in OpenSearch.'
-        }
+        # Calculate costs if there are jobs and nodes details
+        if jobs_detail and nodes_detail:
+            jobs_cost = calculate_cost(nodes_detail, jobs_detail)
+            logger.info(f"The job cost: {jobs_cost}")
+
+            job_detail_with_cost = []
+            for job in jobs_detail:
+                combined_id = job["combined_id"]
+                job["estimated_cost"] = jobs_cost.get(combined_id, 0)
+                job_detail_with_cost.append(job)
+
+            # Push costs to OpenSearch
+            response = post_estimated_cost_to_opensearch(ENDPOINT, job_detail_with_cost)
+            return {
+                'statusCode': 200,
+                'body': 'Successfully processed jobs and updated estimated costs in OpenSearch.'
+            }
+        else:
+            # Log message and return early if no data to process
+            logger.info("No jobs or nodes detail to process.")
+            return {
+                'statusCode': 200,
+                'body': 'No jobs or nodes detail to process.'
+            }
+
     except Exception as e:
         logger.error(f"Error processing the Lambda: {str(e)}")
         return {
@@ -56,24 +70,25 @@ def extract_data_from_response(response_body):
     hits = parsed_response.get('hits', {}).get('hits', [])
     extracted_data_list = []
     instance_ids = set()
-    combined_ids = set()
 
     for hit in hits:
+        if "processed" in hit["_source"]:
+            # Skip the log if it is already processed
+            continue
         if "detail" in hit["_source"]:
             detail = hit["_source"]["detail"]
             cluster = hit["_source"]["cluster-name"]
 
             if "job_id" in detail:
                 combined_id = f"{cluster}_{detail['job_id']}"
-                if combined_id not in combined_ids:
-                    combined_ids.add(combined_id)
-                    extracted_data = {
-                        "cluster_name": cluster,
-                        "combined_id": combined_id,
-                        "detail": detail
-                    }
-                    extracted_data_list.append(extracted_data)
+                extracted_data = {
+                    "cluster_name": cluster,
+                    "combined_id": combined_id,
+                    "detail": detail
+                }
+                extracted_data_list.append(extracted_data)
             else:
+                # Based on the simplified assumption, the node mapping will not change once form
                 node_list = detail.get("node_list", [])
                 new_node_list = []
                 for node in node_list:
@@ -142,9 +157,8 @@ def calculate_cost(nodes_detail, jobs_detail):
         job = job_data["detail"]
         combined_id = job_data["combined_id"]
         logger.info(f"Processing job: {job}")
-
         # Consider job_state: completed and running
-        if job.get("job_state") != "RUNNING" or job.get("job_state") != "COMPLETED":
+        if job.get("job_state") != "RUNNING" and job.get("job_state") != "COMPLETED":
             continue
 
         total_cost_for_job = 0
@@ -207,14 +221,14 @@ def calculate_cost(nodes_detail, jobs_detail):
 
 def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     """
-    Push calculated cost and related information for a specific job to OpenSearch
-    :param endpoint:
+    Push or update calculated cost and related information for a specific job to OpenSearch
+    :param endpoint: OpenSearch endpoint
     :param job_detail_with_cost: A list containing job details and its estimated cost
     :return:
     """
     session = botocore.session.Session()
     sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
-    # name the new index as jobs_estimated_costs
+    # Remember to use bulk API
     path = "/estimated_cost/_bulk/"
     url = endpoint + path
 
@@ -225,10 +239,13 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     # Preparing bulk data
     bulk_data = ''
     for job in job_detail_with_cost:
-        # Use combined_id as document ID
-        action_metadata = {"index": {"_id": job["combined_id"]}}
-        bulk_data += json.dumps(action_metadata) + '\n' + json.dumps(job) + '\n'
-
+        # Add timestamp to the index
+        job["timestamp"] = datetime.utcnow().isoformat() + "Z"
+        # Use combined_id as document ID and specify update operation
+        action_metadata = {"update": {"_id": job["combined_id"]}}
+        update_data = {"doc": job, "doc_as_upsert": True}
+        bulk_data += json.dumps(action_metadata) + '\n' + json.dumps(update_data) + '\n'
+    logger.info(f"Prepared bulk data: {bulk_data}")
     request = AWSRequest(method="POST", url=url, data=bulk_data, headers=headers)
     logger.info(f"Sending bulk request to {url}")
     sigv4.add_auth(request)
