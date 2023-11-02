@@ -88,9 +88,12 @@ def extract_data_from_response(response_body):
 
             if "job_id" in detail:
                 combined_id = f"{cluster}_{detail['job_id']}"
-                # Update the dictionary of job state and run time
-                cur_runtime = detail.get('runtime')
+                # Get the current job state and runtime
                 cur_job_state = detail.get('job_state')
+                raw_cur_runtime = detail.get('runtime')
+                cur_runtime = calculate_runtime_in_minutes(raw_cur_runtime) if raw_cur_runtime else None
+
+                # Update the dictionary of job state and run time
                 if combined_id in job_status_dict:
                     prev_job_state = job_status_dict[combined_id].get("state")
                     prev_runtime = job_status_dict[combined_id].get("runtime")
@@ -99,6 +102,7 @@ def extract_data_from_response(response_body):
                             continue
                     elif prev_job_state == "COMPLETED":
                         continue
+
                 job_status_dict[combined_id] = {
                     "state": cur_job_state,
                     "runtime": cur_runtime
