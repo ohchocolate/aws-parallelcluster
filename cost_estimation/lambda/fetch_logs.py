@@ -64,12 +64,19 @@ def lambda_handler(event, context):
         }
 
 
+def calculate_runtime_in_minutes(run_time):
+    # Given a time format as HH:MM:SS, compute total minutes.
+    hours, minutes, seconds = map(int, run_time.split(':'))
+    return hours * 60 + minutes + seconds / 60
+
+
 def extract_data_from_response(response_body):
     logger.info("start extracting...")
     parsed_response = json.loads(response_body)
     hits = parsed_response.get('hits', {}).get('hits', [])
     extracted_data_list = []
     instance_ids = set()
+    job_status_dict = {}
 
     for hit in hits:
         if "processed" in hit["_source"]:
@@ -81,6 +88,22 @@ def extract_data_from_response(response_body):
 
             if "job_id" in detail:
                 combined_id = f"{cluster}_{detail['job_id']}"
+                # Update the dictionary of job state and run time
+                cur_runtime = detail.get('runtime')
+                cur_job_state = detail.get('job_state')
+                if combined_id in job_status_dict:
+                    prev_job_state = job_status_dict[combined_id].get("state")
+                    prev_runtime = job_status_dict[combined_id].get("runtime")
+                    if prev_job_state == "RUNNING" and cur_job_state == "RUNNING":
+                        if cur_runtime is not None and (prev_runtime is None or cur_runtime <= prev_runtime):
+                            continue
+                    elif prev_job_state == "COMPLETED":
+                        continue
+                job_status_dict[combined_id] = {
+                    "state": cur_job_state,
+                    "runtime": cur_runtime
+                }
+                logger.info(f"The current job_status_dict is {job_status_dict}")
                 extracted_data = {
                     "cluster_name": cluster,
                     "combined_id": combined_id,
@@ -131,12 +154,6 @@ def get_instance_cost(instance_type):
     return costs.get(instance_type, 0)
 
 
-def calculate_runtime_in_minutes(run_time):
-    # Given a time format as HH:MM:SS, compute total minutes.
-    hours, minutes, seconds = map(int, run_time.split(':'))
-    return hours * 60 + minutes + seconds / 60
-
-
 def get_total_cores(cpu_ids):
     total_cores = 0
     for cpu_id in cpu_ids:
@@ -162,7 +179,7 @@ def calculate_cost(nodes_detail, jobs_detail):
             continue
 
         total_cost_for_job = 0
-        # TODO: Add condition to check the runtime in log before update the estimated cost
+
         job_runtime_minutes = calculate_runtime_in_minutes(job["run_time"])
 
         current_cluster = job_data["cluster_name"]
@@ -245,9 +262,7 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
         action_metadata = {"update": {"_id": job["combined_id"]}}
         update_data = {"doc": job, "doc_as_upsert": True}
         bulk_data += json.dumps(action_metadata) + '\n' + json.dumps(update_data) + '\n'
-    logger.info(f"Prepared bulk data: {bulk_data}")
     request = AWSRequest(method="POST", url=url, data=bulk_data, headers=headers)
-    logger.info(f"Sending bulk request to {url}")
     sigv4.add_auth(request)
     prepped_request = request.prepare()
 
