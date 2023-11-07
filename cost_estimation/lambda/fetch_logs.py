@@ -23,11 +23,11 @@ ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazon
 
 def lambda_handler(event, context):
     try:
-        # TODO: CHECK IF THE DATA IS PROCESSED
         # dict: {'statusCode': int, 'body': str}
         jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
         jobs_detail = extract_data_from_response(jobs_log['body'])
         logger.info(f"The extracted_data_list of jobs log {jobs_detail}")
+
         nodes_log = search_data(ENDPOINT, "node-instance-mapping-event")
         nodes_detail = extract_data_from_response(nodes_log['body'])
         logger.info(f"The extracted_data_list of nodes log {nodes_detail}")
@@ -36,11 +36,7 @@ def lambda_handler(event, context):
             jobs_cost = calculate_cost(nodes_detail, jobs_detail)
             logger.info(f"The job cost: {jobs_cost}")
 
-            job_detail_with_cost = []
-            for job in jobs_detail:
-                combined_id = job["combined_id"]
-                job["estimated_cost"] = jobs_cost.get(combined_id, 0)
-                job_detail_with_cost.append(job)
+            job_detail_with_cost = merge_job_details_with_cost(jobs_detail, jobs_cost)
 
             # Push costs to OpenSearch
             response = post_estimated_cost_to_opensearch(ENDPOINT, job_detail_with_cost)
@@ -64,10 +60,61 @@ def lambda_handler(event, context):
         }
 
 
+def merge_job_details_with_cost(jobs_detail, jobs_cost):
+    job_detail_with_cost = []
+    for job in jobs_detail:
+        combined_id = job["combined_id"]
+        job["estimated_cost"] = jobs_cost.get(combined_id, 0)
+        job_detail_with_cost.append(job)
+    return job_detail_with_cost
+
+
 def calculate_runtime_in_minutes(run_time):
     # Given a time format as HH:MM:SS, compute total minutes.
     hours, minutes, seconds = map(int, run_time.split(':'))
     return hours * 60 + minutes + seconds / 60
+
+
+def skip_processed_log(hit):
+    return "processed" in hit["_source"]
+
+
+def skip_job_update(prev_job_state, cur_job_state, prev_runtime, cur_runtime):
+    # Only update the dictionary of job status if the job state is running and the job has larger runtime
+    if prev_job_state == "RUNNING" and cur_job_state == "RUNNING":
+        return cur_runtime is not None and (prev_runtime is None or cur_runtime <= prev_runtime)
+    elif prev_job_state == "COMPLETED":
+        return True
+    return False
+
+
+def extract_job_info(detail, combined_id, job_status_dict):
+    # Get the current job state and runtime
+    cur_job_state = detail.get('job_state')
+    raw_cur_runtime = detail.get('runtime')
+    cur_runtime = calculate_runtime_in_minutes(raw_cur_runtime) if raw_cur_runtime else None
+
+    # Update the dictionary of job state and run time
+    if combined_id in job_status_dict:
+        prev_job_state = job_status_dict[combined_id].get("state")
+        prev_runtime = job_status_dict[combined_id].get("runtime")
+        if skip_job_update(prev_job_state, cur_job_state, prev_runtime, cur_runtime):
+            return None
+    return {
+        "state": cur_job_state,
+        "runtime": cur_runtime
+    }
+
+
+def update_node_list(detail, instance_ids):
+    node_list = detail.get("node_list", [])
+    new_node_list = []
+    for node in node_list:
+        instance_id = node.get("instance_id")
+        if instance_id and instance_id not in instance_ids:
+            instance_ids.add(instance_id)
+            new_node_list.append(node)
+    return new_node_list
 
 
 def extract_data_from_response(response_body):
@@ -79,7 +126,7 @@ def extract_data_from_response(response_body):
     job_status_dict = {}
 
     for hit in hits:
-        if "processed" in hit["_source"]:
+        if skip_processed_log(hit):
             # Skip the log if it is already processed
             continue
         if "detail" in hit["_source"]:
@@ -87,42 +134,22 @@ def extract_data_from_response(response_body):
             cluster = hit["_source"]["cluster-name"]
 
             if "job_id" in detail:
+                # Create a combined id as the unique identifier for the cluster job combination
                 combined_id = f"{cluster}_{detail['job_id']}"
-                # Get the current job state and runtime
-                cur_job_state = detail.get('job_state')
-                raw_cur_runtime = detail.get('runtime')
-                cur_runtime = calculate_runtime_in_minutes(raw_cur_runtime) if raw_cur_runtime else None
+                job_info = extract_job_info(detail, combined_id, job_status_dict)
 
-                # Update the dictionary of job state and run time
-                if combined_id in job_status_dict:
-                    prev_job_state = job_status_dict[combined_id].get("state")
-                    prev_runtime = job_status_dict[combined_id].get("runtime")
-                    if prev_job_state == "RUNNING" and cur_job_state == "RUNNING":
-                        if cur_runtime is not None and (prev_runtime is None or cur_runtime <= prev_runtime):
-                            continue
-                    elif prev_job_state == "COMPLETED":
-                        continue
-
-                job_status_dict[combined_id] = {
-                    "state": cur_job_state,
-                    "runtime": cur_runtime
-                }
-                logger.info(f"The current job_status_dict is {job_status_dict}")
-                extracted_data = {
-                    "cluster_name": cluster,
-                    "combined_id": combined_id,
-                    "detail": detail
-                }
-                extracted_data_list.append(extracted_data)
+                if job_info:
+                    job_status_dict[combined_id] = job_info
+                    logger.info(f"The current job_status_dict is {job_status_dict}")
+                    extracted_data = {
+                        "cluster_name": cluster,
+                        "combined_id": combined_id,
+                        "detail": detail
+                    }
+                    extracted_data_list.append(extracted_data)
             else:
                 # Based on the simplified assumption, the node mapping will not change once form
-                node_list = detail.get("node_list", [])
-                new_node_list = []
-                for node in node_list:
-                    instance_id = node.get("instance_id")
-                    if instance_id and instance_id not in instance_ids:
-                        instance_ids.add(instance_id)
-                        new_node_list.append(node)
+                new_node_list = update_node_list(detail, instance_ids)
                 if new_node_list:
                     extracted_data = {
                         "cluster_name": cluster,
@@ -136,6 +163,7 @@ def extract_data_from_response(response_body):
     return extracted_data_list
 
 
+# In the stretch goal, the instance cost may be changed
 def get_instance_cost(instance_type):
     # Reference: https://aws.amazon.com/ec2/instance-types/t2/
     # In the real scenario, we may need to call an API
@@ -170,74 +198,84 @@ def get_total_cores(cpu_ids):
     return total_cores
 
 
+def is_job_relevant(job):
+    return job.get("job_state") in ["RUNNING", "COMPLETED"]
+
+
+def get_cluster_nodes_detail(nodes_detail, current_cluster):
+    for node_cluster in nodes_detail:
+        if node_cluster["cluster_name"] == current_cluster:
+            return node_cluster["detail"]["node_list"]
+    logger.error(f"Could not find node details for cluster: {current_cluster}")
+    return None
+
+
+def find_node_detail(cluster_nodes_detail, node_name):
+    node_detail = next((node for node in cluster_nodes_detail if node["node_name"] == node_name), None)
+    if not node_detail:
+        logger.error(f"Could not find node details for node name: {node_name}")
+    return node_detail
+
+
+def calculate_cpu_usage_ratio(used_cores, node_detail):
+    total_vcpus = node_detail["threads_per_core"] * node_detail["core_count"]
+    return used_cores / total_vcpus if total_vcpus else 0
+
+
+def calculate_cost_for_node(node_name, cpu_ids, cluster_nodes_detail, job_runtime_minutes):
+    node_detail = find_node_detail(cluster_nodes_detail, node_name)
+    if node_detail:
+        used_cores = get_total_cores(cpu_ids)
+        cpu_usage_ratio = calculate_cpu_usage_ratio(used_cores, node_detail)
+        cost_per_minute = calculate_cost_per_minute(node_detail)
+        return cost_per_minute * job_runtime_minutes * cpu_usage_ratio
+    return 0
+
+
+def calculate_cost_per_minute(node_detail):
+    cost_per_hour = get_instance_cost(node_detail["instance_type"])
+    return cost_per_hour / 60
+
+
+def calculate_cost_for_job(job_data, nodes_detail):
+    total_cost_for_job = 0
+    job_runtime_minutes = calculate_runtime_in_minutes(job_data["detail"]["run_time"])
+    cluster_nodes_detail = get_cluster_nodes_detail(nodes_detail, job_data["cluster_name"])
+
+    if cluster_nodes_detail:
+        for node_name, cpu_ids in zip(job_data["detail"]["nodes"], job_data["detail"]["cpu_ids"]):
+            cost_for_node = calculate_cost_for_node(node_name, cpu_ids, cluster_nodes_detail, job_runtime_minutes)
+            total_cost_for_job += cost_for_node
+
+    return round(total_cost_for_job, 4)
+
+
 def calculate_cost(nodes_detail, jobs_detail):
     logger.info("Enter into the cost calculation")
     total_costs = {}
     logger.info(f"Current nodes detail: {nodes_detail}")
     for job_data in jobs_detail:
-        job = job_data["detail"]
-        combined_id = job_data["combined_id"]
-        logger.info(f"Processing job: {job}")
-        # Consider job_state: completed and running
-        if job.get("job_state") != "RUNNING" and job.get("job_state") != "COMPLETED":
-            continue
-
-        total_cost_for_job = 0
-
-        job_runtime_minutes = calculate_runtime_in_minutes(job["run_time"])
-
-        current_cluster = job_data["cluster_name"]
-
-        cluster_nodes_detail = None
-        for node_cluster in nodes_detail:
-            if node_cluster["cluster_name"] == current_cluster:
-                cluster_nodes_detail = node_cluster["detail"]["node_list"]
-                break
-
-        if not cluster_nodes_detail:
-            logger.error(f"Could not find node details for cluster: {current_cluster}")
-            continue
-        logger.info(f"This is current cluster node detail: {cluster_nodes_detail}")
-        for node_name, cpu_ids in zip(job["nodes"], job["cpu_ids"]):
-            logger.info(f"Processing node name {node_name}")
-
-            node_detail = next((node for node in cluster_nodes_detail if node["node_name"] == node_name), None)
-            logger.info(f"This is current node detail {node_detail}")
-            if not node_detail:
-                logger.error(f"Could not find node details for node name: {node_name}")
-                continue
-
-            # Calculate total vCPUs for the node
-            total_vcpus = node_detail["threads_per_core"] * node_detail["core_count"]
-            if total_vcpus == 0:
-                continue
-
-            # Calculate the number of used CPUs for the job on that node
-            used_cores = get_total_cores(cpu_ids)
-            logger.info(f"This is the used CPUs {used_cores} for node {node_name}")
-
-            # Determine the CPU usage ratio for the job on that node
-            cpu_usage_ratio = used_cores / total_vcpus
-            logger.info(f"This is the cpu usage ratio {cpu_usage_ratio}")
-
-            # Fetch the cost per hour for that instance_type
-            cost_per_hour = get_instance_cost(node_detail["instance_type"])
-
-            # Calculate the cost per minute and then for the job's runtime
-            cost_per_minute = cost_per_hour / 60
-            cost_for_node = cost_per_minute * job_runtime_minutes * cpu_usage_ratio
-            logger.info(f"This is the cost {cost_for_node} for node {node_name}")
-
-            total_cost_for_job += cost_for_node
-            # Round cost
-            rounded_cost_for_job = round(total_cost_for_job, 4)
-            logger.info(f"This is the total cost for job {combined_id}: {total_cost_for_job}")
-            logger.info(f"This is the rounded total cost for job {combined_id}: {total_cost_for_job}")
-        # cluster name + job id as the key
-        total_costs[combined_id] = rounded_cost_for_job
-        logger.info(f"Current total costs is {total_costs}")
-
+        if is_job_relevant(job_data["detail"]):
+            total_costs[job_data["combined_id"]] = calculate_cost_for_job(job_data, nodes_detail)
     return total_costs
+
+
+def prepare_bulk_data(job_detail_with_cost):
+    bulk_data = ''
+    for job in job_detail_with_cost:
+        # Add timestamp to the index
+        job["timestamp"] = datetime.utcnow().isoformat() + "Z"
+        # Use combined_id as document ID and specify update operation
+        action_metadata = {"update": {"_id": job["combined_id"]}}
+        update_data = {"doc": job, "doc_as_upsert": True}
+        bulk_data += json.dumps(action_metadata) + '\n' + json.dumps(update_data) + '\n'
+    return bulk_data
+
+
+def prepare_request(method, url, data, headers, sigv4):
+    request = AWSRequest(method=method, url=url, data=data, headers=headers)
+    sigv4.add_auth(request)
+    return request.prepare()
 
 
 def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
@@ -250,7 +288,7 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     session = botocore.session.Session()
     sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
     # Remember to use bulk API
-    path = "/estimated_cost/_bulk/"
+    path = "/jce-2023.11.05/_bulk/"
     url = endpoint + path
 
     headers = {
@@ -258,17 +296,8 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     }
 
     # Preparing bulk data
-    bulk_data = ''
-    for job in job_detail_with_cost:
-        # Add timestamp to the index
-        job["timestamp"] = datetime.utcnow().isoformat() + "Z"
-        # Use combined_id as document ID and specify update operation
-        action_metadata = {"update": {"_id": job["combined_id"]}}
-        update_data = {"doc": job, "doc_as_upsert": True}
-        bulk_data += json.dumps(action_metadata) + '\n' + json.dumps(update_data) + '\n'
-    request = AWSRequest(method="POST", url=url, data=bulk_data, headers=headers)
-    sigv4.add_auth(request)
-    prepped_request = request.prepare()
+    bulk_data = prepare_bulk_data(job_detail_with_cost)
+    prepped_request = prepare_request("POST", url, bulk_data, headers, sigv4)
 
     # Send the request
     try:
@@ -318,9 +347,8 @@ def mark_documents_as_processed(endpoint, event_type):
         }
     }
     headers = {"Content-Type": "application/json"}
-    request = AWSRequest(method="POST", url=url, data=json.dumps(query), headers=headers)
-    sigv4.add_auth(request)
-    prepped_request = request.prepare()
+
+    prepped_request = prepare_request("POST", url, json.dumps(query), headers, sigv4)
 
     # Send the request
     try:
@@ -339,7 +367,7 @@ def mark_documents_as_processed(endpoint, event_type):
         }
 
 
-def build_query(event_type):
+def build_query_to_search(event_type):
     return {
         "size": 5,
         "query": {
@@ -363,21 +391,17 @@ def search_data(endpoint, event_type):
     # searching in OpenSearch for indices matching the pattern "cwl-*"
     path = "/cwl-*/_search"
     url = endpoint + path
-    query = build_query(event_type)
+    query = build_query_to_search(event_type)
     headers = {"Content-Type": "application/json"}
-    request = AWSRequest(method="GET", url=url, data=json.dumps(query), headers=headers)
-    sigv4.add_auth(request)
-    prepped_request = request.prepare()
+
+    prepped_request = prepare_request("GET", url, json.dumps(query), headers, sigv4)
 
     # Send the request and handle response
     try:
         response = requests.get(url, headers=prepped_request.headers, data=prepped_request.body)
         response.raise_for_status()
         logger.info("Query succeeded")
-        # convert response to json
         results = response.json()
-        # logger.info("See the response below")
-        # print(results)
         return {
             'statusCode': 200,
             'body': json.dumps(results)
