@@ -33,10 +33,10 @@ def lambda_handler(event, context):
         logger.info(f"The extracted_data_list of nodes log {nodes_detail}")
         # Calculate costs if there are jobs and nodes details
         if jobs_detail and nodes_detail:
-            jobs_cost = calculate_cost(nodes_detail, jobs_detail)
-            logger.info(f"The job cost: {jobs_cost}")
+            jobs_cost_dict = calculate_cost(nodes_detail, jobs_detail)
+            logger.info(f"The job cost: {jobs_cost_dict}")
 
-            job_detail_with_cost = merge_job_details_with_cost(jobs_detail, jobs_cost)
+            job_detail_with_cost = merge_job_details_with_cost(jobs_detail, jobs_cost_dict)
 
             # Push costs to OpenSearch
             response = post_estimated_cost_to_opensearch(ENDPOINT, job_detail_with_cost)
@@ -60,22 +60,26 @@ def lambda_handler(event, context):
         }
 
 
-def merge_job_details_with_cost(jobs_detail, jobs_cost):
+def merge_job_details_with_cost(jobs_detail, jobs_cost_dict):
     job_detail_with_cost = []
     for job in jobs_detail:
         combined_id = job["combined_id"]
-        job["estimated_cost"] = jobs_cost.get(combined_id, 0)
+        job["estimated_cost"] = jobs_cost_dict.get(combined_id, 0)
         job_detail_with_cost.append(job)
     return job_detail_with_cost
 
 
-def calculate_runtime_in_minutes(run_time):
-    # Given a time format as HH:MM:SS, compute total minutes.
-    hours, minutes, seconds = map(int, run_time.split(':'))
-    return hours * 60 + minutes + seconds / 60
+def parse_runtime_to_minutes(run_time):
+    try:
+        # Given a time format as HH:MM:SS, compute total minutes.
+        hours, minutes, seconds = map(int, run_time.split(':'))
+        return hours * 60 + minutes + seconds / 60
+    except ValueError as e:
+        logger.error(f"Error parsing runtime '{run_time}': {e}")
+        raise ValueError(f"Invalid run_time format: {run_time}")
 
 
-def skip_processed_log(hit):
+def is_log_processed(hit):
     return "processed" in hit["_source"]
 
 
@@ -92,7 +96,7 @@ def extract_job_info(detail, combined_id, job_status_dict):
     # Get the current job state and runtime
     cur_job_state = detail.get('job_state')
     raw_cur_runtime = detail.get('runtime')
-    cur_runtime = calculate_runtime_in_minutes(raw_cur_runtime) if raw_cur_runtime else None
+    cur_runtime = parse_runtime_to_minutes(raw_cur_runtime) if raw_cur_runtime else None
 
     # Update the dictionary of job state and run time
     if combined_id in job_status_dict:
@@ -126,7 +130,7 @@ def extract_data_from_response(response_body):
     job_status_dict = {}
 
     for hit in hits:
-        if skip_processed_log(hit):
+        if is_log_processed(hit):
             # Skip the log if it is already processed
             continue
         if "detail" in hit["_source"]:
@@ -239,7 +243,7 @@ def calculate_cost_per_minute(node_detail):
 
 def calculate_cost_for_job(job_data, nodes_detail):
     total_cost_for_job = 0
-    job_runtime_minutes = calculate_runtime_in_minutes(job_data["detail"]["run_time"])
+    job_runtime_minutes = parse_runtime_to_minutes(job_data["detail"]["run_time"])
     cluster_nodes_detail = get_cluster_nodes_detail(nodes_detail, job_data["cluster_name"])
 
     if cluster_nodes_detail:
