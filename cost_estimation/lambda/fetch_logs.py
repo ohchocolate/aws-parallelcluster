@@ -92,6 +92,10 @@ def skip_job_update(prev_job_state, cur_job_state, prev_runtime, cur_runtime):
     return False
 
 
+def format_partition_name(cluster_name, partition):
+    return f"{cluster_name}_{partition}"
+
+
 def extract_job_info(detail, combined_id, job_status_dict):
     # Get the current job state and runtime
     cur_job_state = detail.get('job_state')
@@ -137,6 +141,10 @@ def extract_data_from_response(response_body):
             detail = hit["_source"]["detail"]
             cluster = hit["_source"]["cluster-name"]
 
+            if "partition" in detail:
+                formatted_partition_name = format_partition_name(cluster, detail["partition"])
+                detail["partition"] = formatted_partition_name
+
             if "job_id" in detail:
                 # Create a combined id as the unique identifier for the cluster job combination
                 combined_id = f"{cluster}_{detail['job_id']}"
@@ -172,13 +180,6 @@ def get_instance_cost(instance_type):
     # Reference: https://aws.amazon.com/ec2/instance-types/t2/
     # In the real scenario, we may need to call an API
     costs = {
-        # "t2.nano": 0.01,
-        # "t2.micro": 0.01,
-        # "t2.small": 0.02,
-        # "t2.medium": 0.05,
-        # "t2.large": 0.09,
-        # "t2.xlarge": 0.19,
-        # "t2.2xlarge": 0.37
         "t2.nano": 1,
         "t2.micro": 1,
         "t2.small": 2,
