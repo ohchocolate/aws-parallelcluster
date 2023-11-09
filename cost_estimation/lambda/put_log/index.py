@@ -13,8 +13,6 @@ import datetime
 import json
 import logging
 import math
-import os
-import re
 import zlib
 
 import requests
