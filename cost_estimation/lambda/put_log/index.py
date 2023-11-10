@@ -1,12 +1,10 @@
-# uncomment the following line in the lambda console to run tests
+import os
+import sys
+import subprocess
 
-# import sys
-# import subprocess
-#
-# subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
-#                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-# sys.path.insert(1, '/tmp/')
-# from opensearchpy import OpenSearch, RequestsHttpConnection
+subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+sys.path.insert(1, '/tmp/')
 
 import base64
 import datetime
@@ -25,12 +23,10 @@ logger.setLevel(logging.INFO)
 session = botocore.session.Session()
 sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
 
-# ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
+ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
 
 # original end point
-ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
-
-LOG_FAILED_RESPONSES = False
+# ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
 
 
 def lambda_handler(event, context):

@@ -1,7 +1,9 @@
 from aws_cdk import core
 
-from my_cdk_app_stack import MyCdkAppStack
+from simple_cdk_app_stack import SimpleCdkAppStack
+# from my_cdk_app_stack import MyCdkAppStack
 
 app = core.App()
-MyCdkAppStack(app, "MyCdkAppStack")
+SimpleCdkAppStack(app, "SimpleCdkAppStack")
+# MyCdkAppStack(app, "MyCdkAppStack")
 app.synth()

@@ -3,16 +3,18 @@ from aws_cdk import core as cdk
 from aws_cdk import aws_opensearchservice as open_search
 from aws_cdk import aws_lambda as _lambda
 from aws_cdk import aws_iam as iam
-from aws_cdk import aws_logs as logs
 from aws_cdk import aws_secretsmanager as sm
 from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_events as events
 
 
+# Should use AWS CDK v2
 class MyCdkAppStack(cdk.Stack):
 
     def __init__(self, scope: cdk.Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # SECRETE MANAGER
         # Retrieve the secret from Secret Manager
         secret = sm.Secret.from_secret_arn(
             self,
@@ -20,6 +22,7 @@ class MyCdkAppStack(cdk.Stack):
             "arn:aws:secretsmanager:us-east-2:691480250603:secret:MyOpenSearch-z4pZFs",
         )
 
+        # IAM ROLE AND POLICY
         # Create IAM role for the Lambda function
         role = iam.Role(
             self,
@@ -38,14 +41,16 @@ class MyCdkAppStack(cdk.Stack):
         # Assign AmazonOpenSearchServiceFullAccess to the Lambda role
         role.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name('AmazonOpenSearchServiceFullAccess'))
 
-        # Allow this rle to read log events
-        # Not sure if I should use AWS managed policy
+        # Allow this role to read lambda code in a S3 bucket
+        s3_bucket_name = "log-lambda-func"
+        lambda_code_key = "put_log.zip"
         role.add_to_policy(iam.PolicyStatement(
-            actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
-            resources=["*"],
+            actions=["s3:GetObject"],
+            resources=[f"arn:aws:s3:::{s3_bucket_name}/{lambda_code_key}"],
             effect=iam.Effect.ALLOW
         ))
 
+        # OPEN SEARCH DOMAIN
         # optional parameter: engine_version（will use the latest version as default), domain_name
         domain = open_search.CfnDomain(
             self,
@@ -72,8 +77,9 @@ class MyCdkAppStack(cdk.Stack):
         )
 
         endpoint = domain.attr_domain_endpoint
+
+        # LAMBDA CODE
         # Create the first Lambda function with the defined role
-        # TODO: Create two lambda function to handle two cw log stream
         lambda_function = _lambda.Function(
             self,
             "push-log",
@@ -81,7 +87,7 @@ class MyCdkAppStack(cdk.Stack):
             # this method does not work because the lambda code needs a module named request
             # code=_lambda.Code.from_asset(os.path.join(os.path.dirname("index.py"), "lambda")),
             code=_lambda.Code.from_bucket(bucket=s3.Bucket.from_bucket_name(self, "Bucket", "log-lambda-func"),
-                                          key="lambda_package.zip"),
+                                          key="put_log.zip"),
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="index.lambda_handler",
             environment={
@@ -90,11 +96,3 @@ class MyCdkAppStack(cdk.Stack):
             }
         )
 
-        # Connect CloudWatch log group/log stream with the Lambda func
-        # log_group_name = "/aws/parallelcluster/get-log3-202310032109"
-        # log_group = logs.LogGroup.from_log_group_name(self, "ExistingLogGroup", log_group_name)
-        # log_group.add_subscription_filter(
-        #     "LambdaSubscriptionFilter",
-        #     destination=LambdaDestination(lambda_function),
-        #     filter_pattern=logs.FilterPattern.all_events()
-        # )

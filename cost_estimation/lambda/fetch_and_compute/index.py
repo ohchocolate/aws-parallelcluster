@@ -1,10 +1,10 @@
-# import sys
-# import subprocess
-#
-# subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
-#                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-# sys.path.insert(1, '/tmp/')
-# from opensearchpy import OpenSearch, RequestsHttpConnection
+import os
+import sys
+import subprocess
+
+subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+sys.path.insert(1, '/tmp/')
 
 import json
 import logging
@@ -18,7 +18,10 @@ from botocore.awsrequest import AWSRequest
 # Build a logger for debug
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
+
+ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
+# Original Endpoint
+# ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
 
 
 def lambda_handler(event, context):
