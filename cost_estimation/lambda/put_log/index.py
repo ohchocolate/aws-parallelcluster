@@ -27,6 +27,7 @@ ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
 
 # original end point
 # ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
+LOG_FAILED_RESPONSES = False
 
 
 def lambda_handler(event, context):
@@ -243,5 +244,3 @@ def post(body):
     endpoint_for_post = ENDPOINT + "/_bulk"
     response = make_request("POST", endpoint_for_post, body)
     return response
-
-

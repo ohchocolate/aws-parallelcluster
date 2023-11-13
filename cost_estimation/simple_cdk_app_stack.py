@@ -37,13 +37,18 @@ class SimpleCdkAppStack(cdk.Stack):
 
         # Assign AmazonOpenSearchServiceFullAccess to the Lambda role
         role.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name('AmazonOpenSearchServiceFullAccess'))
-
         # Allow this role to read lambda code in a S3 bucket
         s3_bucket_name = "log-lambda-func"
         lambda_code_key = "put_log.zip"
         role.add_to_policy(iam.PolicyStatement(
             actions=["s3:GetObject"],
             resources=[f"arn:aws:s3:::{s3_bucket_name}/{lambda_code_key}"],
+            effect=iam.Effect.ALLOW
+        ))
+        # Allow this role to write data in OpenSearch domian
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["es:ESHttpPost", "es:ESHttpPut"],
+            resources=[f"arn:aws:es:{self.region}:{self.account}:domain/my-domain/*"],
             effect=iam.Effect.ALLOW
         ))
 
@@ -74,6 +79,7 @@ class SimpleCdkAppStack(cdk.Stack):
                 internal_user_database_enabled=True,
                 master_user_options=open_search.CfnDomain.MasterUserOptionsProperty(
                     master_user_name="master",
+                    # master_user_password=secret.secret_value_from_json('password').to_string()，
                     master_user_password=secret.secret_value.unsafe_unwrap(),
                 )
             ),
@@ -83,7 +89,7 @@ class SimpleCdkAppStack(cdk.Stack):
             )
         )
 
-        endpoint = domain.attr_domain_endpoint
+        endpoint = f"https://{domain.attr_domain_endpoint}"
 
         # LAMBDA CODE
         # Create the first Lambda function with the defined role
@@ -91,12 +97,10 @@ class SimpleCdkAppStack(cdk.Stack):
             self,
             "put_log",
             role=role,
-            # this method does not work because the lambda code needs a module named request
-            # code=_lambda.Code.from_asset(os.path.join(os.path.dirname("index.py"), "lambda")),
             code=_lambda.Code.from_bucket(bucket=s3.Bucket.from_bucket_name(self, "Bucket", "log-lambda-func"),
                                           key="put_log.zip"),
             runtime=_lambda.Runtime.PYTHON_3_9,
-            handler="index.handler",
+            handler="index.lambda_handler",
             environment={
                 "SECRET_NAME": secret.secret_name,
                 "OPENSEARCH_ENDPOINT": endpoint
