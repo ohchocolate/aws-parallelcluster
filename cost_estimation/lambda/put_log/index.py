@@ -154,42 +154,6 @@ def transform(payload):
         index_name = timestamp[:10].split("-")
         index_name = "cwl-" + ".".join(index_name)
         source = build_source(log_event["message"], log_event.get("extractedFields", None))
-        # A test case
-        # source = {
-        #     "datetime": "2023-10-26T05:33:57.311+00:00",
-        #     "version": 0,
-        #     "scheduler": "slurm",
-        #     "cluster-name": "get-log9",
-        #     "node-role": "HeadNode",
-        #     "component": "clusterjobinfomgtd",
-        #     "level": "INFO",
-        #     "instance-id": "i-03aaf121e1e6eb149",
-        #     "event-type": "scontrol-show-job-information",
-        #     "message": "Job information from scontrol",
-        #     "detail": {
-        #         "job_id": "12",
-        #         "job_name": "wrap",
-        #         "user_id": "ec2-user(1000)",
-        #         "account": "(null)",
-        #         "job_state": "COMPLETED",
-        #         "run_time": "00:00:11",
-        #         "start_time": "2023-10-26T05:31:16.000+00:00",
-        #         "end_time": "2023-10-26T05:31:27.000+00:00",
-        #         "partition": "queue1",
-        #         "node_list": "queue1-st-t2micro-1,queue1-st-t2xlarge-[1-2]",
-        #         "nodes": [
-        #             "queue1-st-t2micro-1",
-        #             "queue1-st-t2xlarge-1",
-        #             "queue1-st-t2xlarge-2"
-        #         ],
-        #         "cpu_ids": [
-        #             "0",
-        #             "0-3",
-        #             "0"
-        #         ],
-        #         "gres": []
-        #     }
-        # }
         logger.info(f"Processing source {source}")
         if source is None:
             logger.info("Skipping log event due to empty source: {}".format(log_event["message"]))
@@ -231,9 +195,11 @@ def make_request(method, endpoint, data=None):
     """
     secret = get_secret()
     logger.info(f"The current secret {secret}")
-    username = secret["username"]
-    password = secret["password"]
-    logger.info(f"The current username {username} and password {password}")
+    # The secret dictionary is {master_username: password}
+    # Should use the key name stored in AWS secrete manager
+    username = list(secret.keys())[0]
+    password = secret[username]
+    logger.info(f"The current master_username {username} and password {password}")
 
     logger.info(f"Making {method} request to {endpoint} with data: {data}")
     headers = {"Content-Type": "application/json"}
@@ -242,7 +208,7 @@ def make_request(method, endpoint, data=None):
         method=method,
         url=endpoint,
         auth=HTTPBasicAuth(username, password),
-        json=data,  # Assuming 'data' is a dictionary that can be converted to JSON
+        data=data,  # Assuming 'data' is a dictionary that can be converted to JSON
         headers=headers,
         timeout=200
     )
