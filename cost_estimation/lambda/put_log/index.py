@@ -1,11 +1,6 @@
 import os
 import sys
 import subprocess
-
-subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-sys.path.insert(1, '/tmp/')
-
 import base64
 import datetime
 import json
@@ -16,7 +11,11 @@ import zlib
 import requests
 from botocore.auth import SigV4Auth
 import botocore.session
-from botocore.awsrequest import AWSRequest
+import boto3
+from requests.auth import HTTPBasicAuth
+subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+sys.path.insert(1, '/tmp/')
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -61,6 +60,21 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.error(f"Error processing lambda: {e}")
         return {'statusCode': 500, 'body': str(e)}
+
+
+def get_secret():
+    secret_name = os.environ["SECRET_NAME"]
+    region_name = "us-east-2"
+    s = boto3.session.Session()
+    client = s.client(
+        service_name='secretsmanager',
+        region_name=region_name
+                      )
+
+    get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+    secret = json.loads(get_secret_value_response['SecretString'])
+
+    return secret
 
 
 def build_source(message, extracted_fields):
@@ -215,20 +229,23 @@ def make_request(method, endpoint, data=None):
     :param data: The request payload.
     :return: The response object from the OpenSearch request.
     """
+    secret = get_secret()
+    logger.info(f"The current secret {secret}")
+    username = secret["username"]
+    password = secret["password"]
+    logger.info(f"The current username {username} and password {password}")
 
     logger.info(f"Making {method} request to {endpoint} with data: {data}")
     headers = {"Content-Type": "application/json"}
 
-    request = AWSRequest(method=method, url=endpoint, data=data, headers=headers)
-    request.context["payload_signing_enabled"] = True
-
-    logger.info("Adding SIGV4 auth to the request...")
-    sigv4.add_auth(request)
-
-    prepped = request.prepare()
-
-    logger.info(f"Sending request with URL: {prepped.url}, Headers: {prepped.headers}, Body: {prepped.body}")
-    response = requests.request(method, prepped.url, data=prepped.body, headers=prepped.headers, timeout=200)
+    response = requests.request(
+        method=method,
+        url=endpoint,
+        auth=HTTPBasicAuth(username, password),
+        json=data,  # Assuming 'data' is a dictionary that can be converted to JSON
+        headers=headers,
+        timeout=200
+    )
 
     logger.info(f"Received response with status code: {response.status_code}, content: {response.text}")
     return response
