@@ -1,10 +1,11 @@
-import os
 from aws_cdk import core as cdk
 from aws_cdk import aws_lambda as _lambda
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_opensearchservice as open_search
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as sm
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 
 
 class SimpleCdkAppStack(cdk.Stack):
@@ -43,12 +44,6 @@ class SimpleCdkAppStack(cdk.Stack):
         role.add_to_policy(iam.PolicyStatement(
             actions=["s3:GetObject"],
             resources=[f"arn:aws:s3:::{s3_bucket_name}/{lambda_code_key}"],
-            effect=iam.Effect.ALLOW
-        ))
-        # Allow this role to write data in OpenSearch domian
-        role.add_to_policy(iam.PolicyStatement(
-            actions=["es:ESHttpPost", "es:ESHttpPut"],
-            resources=[f"arn:aws:es:{self.region}:{self.account}:domain/my-domain/*"],
             effect=iam.Effect.ALLOW
         ))
 
@@ -92,12 +87,15 @@ class SimpleCdkAppStack(cdk.Stack):
         endpoint = f"https://{domain.attr_domain_endpoint}"
 
         # LAMBDA CODE
-        # Create the first Lambda function with the defined role
-        lambda_function = _lambda.Function(
+        # Create the put_log Lambda function with the defined role
+
+        s3_bucket = s3.Bucket.from_bucket_name(self, "LambdaFuncBucket", "log-lambda-func")
+
+        put_log_function = _lambda.Function(
             self,
             "put_log",
             role=role,
-            code=_lambda.Code.from_bucket(bucket=s3.Bucket.from_bucket_name(self, "Bucket", "log-lambda-func"),
+            code=_lambda.Code.from_bucket(bucket=s3_bucket,
                                           key="put_log.zip"),
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="index.lambda_handler",
@@ -106,3 +104,24 @@ class SimpleCdkAppStack(cdk.Stack):
                 "OPENSEARCH_ENDPOINT": endpoint
             }
         )
+
+        fetch_and_compute_function = _lambda.Function(
+            self,
+            "fetch_and_compute",
+            role=role,
+            code=_lambda.Code.from_bucket(bucket=s3_bucket,
+                                          key="fetch_and_compute.zip"),
+            runtime=_lambda.Runtime.PYTHON_3_9,
+            handler="index.lambda_handler",
+            timeout=cdk.Duration.seconds(60),
+            environment={
+                "SECRET_NAME": secret.secret_name,
+                "OPENSEARCH_ENDPOINT": endpoint
+            }
+        )
+        event_rule = events.Rule(
+            self,
+            "EveryMinuteEvent",
+            schedule=events.Schedule.expression("rate(1 minute)")
+        )
+        event_rule.add_target(targets.LambdaFunction(fetch_and_compute_function))

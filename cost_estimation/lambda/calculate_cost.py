@@ -14,12 +14,10 @@ def calculate_runtime_in_minutes(run_time):
     return hours * 60 + minutes + seconds / 60
 
 
-def calculate_cost(extracted_data):
-    nodes_list, jobs_list = extracted_data
-
+def calculate_cost(nodes_data, jobs_data):
     total_costs = {}
 
-    for job in jobs_list:
+    for job in jobs_data:
         job_id = job["job_id"]
         total_cost_for_job = 0
 
@@ -27,7 +25,7 @@ def calculate_cost(extracted_data):
         job_runtime_minutes = calculate_runtime_in_minutes(job["run_time"])
 
         for node_name, cpus in zip(job["nodes"], job["cpus"]):
-            node_detail = next((node for node in nodes_list if node["node_name"] == node_name), None)
+            node_detail = next((node for node in nodes_data if node["node_name"] == node_name), None)
 
             if not node_detail:
                 # This is an error scenario where we couldn't find the node detail. Handle as needed.
@@ -39,7 +37,7 @@ def calculate_cost(extracted_data):
 
             # Determine the CPU usage ratio for the job on that node
             cpu_usage_ratio = int(cpus) / total_vcpus
-            print(f"This job {job_id} has the cpu usage ratio of {cpu_usage_ratio}")
+            print(f"This job {job_id} has {cpu_usage_ratio} cpu usage ratio of {node_name}")
 
             # Fetch the cost per hour for that instance_type
             cost_per_hour = get_instance_cost(node_detail["instance_type"])
@@ -49,8 +47,6 @@ def calculate_cost(extracted_data):
             cost_for_node = cost_per_minute * job_runtime_minutes * cpu_usage_ratio
 
             total_cost_for_job += cost_for_node
-
-        # You can update OpenSearch here with the new estimated cost and runtime for the job_id
 
         total_costs[job_id] = total_cost_for_job
 
@@ -115,8 +111,8 @@ if __name__ == '__main__':
             "node-2",
             "node-3",
         ],
-        "cpus": [
-            "3",  # node 1 using 3 cpus
+        "cpu_ids": [
+            "3",
             "3",
             "2",
         ],
@@ -141,7 +137,8 @@ if __name__ == '__main__':
             "node-6",
         ],
         # how many cpu is in use
-        "cpus": [
+        # if this list is empty, then assume we are using the whole node
+        "cpu_ids": [
             "2",
             "2",
             "2",
@@ -152,6 +149,4 @@ if __name__ == '__main__':
 
     jobs_list = [job_detail1, job_detail2]
 
-    extracted_data = nodes_list, jobs_list
-
-    print(calculate_cost(extracted_data))
+    print(calculate_cost(nodes_list, jobs_list))

@@ -1,15 +1,9 @@
 import os
-import sys
-import subprocess
-
-subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-sys.path.insert(1, '/tmp/')
-
 import json
 import logging
 from datetime import datetime
 
+import boto3
 import botocore.session
 import requests
 from botocore.auth import SigV4Auth
@@ -293,10 +287,9 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     :param job_detail_with_cost: A list containing job details and its estimated cost
     :return:
     """
-    session = botocore.session.Session()
-    sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
+    username, password = get_username_and_password()
     # Remember to use bulk API
-    path = "/jce-2023.11.05/_bulk/"
+    path = "/jce-2023.11.13/_bulk/"
     url = endpoint + path
 
     headers = {
@@ -305,11 +298,10 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
 
     # Preparing bulk data
     bulk_data = prepare_bulk_data(job_detail_with_cost)
-    prepped_request = prepare_request("POST", url, bulk_data, headers, sigv4)
 
     # Send the request
     try:
-        response = requests.post(url, headers=prepped_request.headers, data=prepped_request.body)
+        response = requests.post(url, auth=(username, password), headers=headers, data=bulk_data)
         logger.info(f"Received response: {response.status_code} {response.text}")
         response.raise_for_status()
 
@@ -393,20 +385,36 @@ def build_query_to_search(event_type):
     }
 
 
+def get_username_and_password():
+    secret_name = os.environ["SECRET_NAME"]
+    region_name = "us-east-2"
+    s = boto3.session.Session()
+    client = s.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
+
+    get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+    secret = json.loads(get_secret_value_response['SecretString'])
+
+    username = list(secret.keys())[0]
+    password = secret[username]
+
+    return username, password
+
+
 def search_data(endpoint, event_type):
-    session = botocore.session.Session()
-    sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
+    username, password = get_username_and_password()
+
     # searching in OpenSearch for indices matching the pattern "cwl-*"
     path = "/cwl-*/_search"
     url = endpoint + path
     query = build_query_to_search(event_type)
     headers = {"Content-Type": "application/json"}
 
-    prepped_request = prepare_request("GET", url, json.dumps(query), headers, sigv4)
-
     # Send the request and handle response
     try:
-        response = requests.get(url, headers=prepped_request.headers, data=prepped_request.body)
+        response = requests.get(url, auth=(username, password), headers=headers, json=query)
         response.raise_for_status()
         logger.info("Query succeeded")
         results = response.json()

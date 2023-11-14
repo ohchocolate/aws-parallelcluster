@@ -1,6 +1,4 @@
 import os
-import sys
-import subprocess
 import base64
 import datetime
 import json
@@ -13,9 +11,6 @@ from botocore.auth import SigV4Auth
 import botocore.session
 import boto3
 from requests.auth import HTTPBasicAuth
-subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-sys.path.insert(1, '/tmp/')
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

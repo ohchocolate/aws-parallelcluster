@@ -1,6 +1,6 @@
 import aws_cdk as core
 import aws_cdk.assertions as assertions
-from cost_estimation.my_cdk_app_stack import MyCdkAppStack
+from cli.cost_estimation.my_cdk_app_stack import MyCdkAppStack
 
 
 # example tests. To run these tests, uncomment this file along with the example
