@@ -8,6 +8,7 @@ import botocore.session
 import requests
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
+from requests.auth import HTTPBasicAuth
 
 # Build a logger for debug
 logger = logging.getLogger()
@@ -274,10 +275,10 @@ def prepare_bulk_data(job_detail_with_cost):
     return bulk_data
 
 
-def prepare_request(method, url, data, headers, sigv4):
-    request = AWSRequest(method=method, url=url, data=data, headers=headers)
-    sigv4.add_auth(request)
-    return request.prepare()
+# def prepare_request(method, url, data, headers, sigv4):
+#     request = AWSRequest(method=method, url=url, data=data, headers=headers)
+#     sigv4.add_auth(request)
+#     return request.prepare()
 
 
 def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
@@ -330,8 +331,8 @@ def mark_documents_as_processed(endpoint, event_type):
     :param event_type:
     :return:
     """
-    session = botocore.session.Session()
-    sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
+    username, password = get_username_and_password()
+    # sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
     # Update by query to set processed=true for documents matching the event-type
     path = "/cwl-*/_update_by_query"
     url = endpoint + path
@@ -348,11 +349,9 @@ def mark_documents_as_processed(endpoint, event_type):
     }
     headers = {"Content-Type": "application/json"}
 
-    prepped_request = prepare_request("POST", url, json.dumps(query), headers, sigv4)
-
     # Send the request
     try:
-        response = requests.post(url, headers=prepped_request.headers, data=prepped_request.body)
+        response = requests.post(url, auth=HTTPBasicAuth(username, password), headers=headers, data=json.dumps(query))
         response.raise_for_status()
         logger.info("Documents marked as processed")
         return {
