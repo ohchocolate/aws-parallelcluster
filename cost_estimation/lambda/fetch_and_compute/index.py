@@ -4,10 +4,7 @@ import logging
 from datetime import datetime
 
 import boto3
-import botocore.session
 import requests
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
 from requests.auth import HTTPBasicAuth
 
 # Build a logger for debug
@@ -20,6 +17,14 @@ ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
 
 
 def lambda_handler(event, context):
+    """
+    Handles the incoming event by fetching job and node details from CloudWatch logs,
+    calculating costs, and posting estimated costs to OpenSearch.
+
+    :param event: The event triggering the lambda.
+    :param context: Lambda execution context.
+    :return: A dictionary with statusCode and body indicating the outcome of the operation.
+    """
     try:
         # dict: {'statusCode': int, 'body': str}
         jobs_log = search_data(ENDPOINT, "scontrol-show-job-information")
@@ -59,6 +64,13 @@ def lambda_handler(event, context):
 
 
 def merge_job_details_with_cost(jobs_detail, jobs_cost_dict):
+    """
+    Merges job details with their estimated costs.
+
+    :param jobs_detail: A list of dictionaries, each containing details of a job.
+    :param jobs_cost_dict: A dictionary mapping job combined ids to their estimated costs.
+    :return: A list of job details merged with their estimated costs.
+    """
     job_detail_with_cost = []
     for job in jobs_detail:
         combined_id = job["combined_id"]
@@ -68,6 +80,13 @@ def merge_job_details_with_cost(jobs_detail, jobs_cost_dict):
 
 
 def parse_runtime_to_minutes(run_time):
+    """
+    Parses a runtime string in HH:MM:SS format and converts it to total minutes.
+
+    :param run_time: String representation of runtime in HH:MM:SS format.
+    :return: Total runtime in minutes as an integer.
+    :raises ValueError: If run_time format is invalid.
+    """
     try:
         # Given a time format as HH:MM:SS, compute total minutes.
         hours, minutes, seconds = map(int, run_time.split(':'))
@@ -78,10 +97,25 @@ def parse_runtime_to_minutes(run_time):
 
 
 def is_log_processed(hit):
+    """
+    Checks if a log entry has already been processed.
+
+    :param hit: A dictionary representing a log entry.
+    :return: Boolean indicating whether the log entry is marked as processed.
+    """
     return "processed" in hit["_source"]
 
 
 def skip_job_update(prev_job_state, cur_job_state, prev_runtime, cur_runtime):
+    """
+    Determines whether to skip updating a job based on its current and previous states and runtimes.
+
+    :param prev_job_state: The previous state of the job.
+    :param cur_job_state: The current state of the job.
+    :param prev_runtime: The previous runtime of the job.
+    :param cur_runtime: The current runtime of the job.
+    :return: Boolean indicating whether to skip the job update.
+    """
     # Only update the dictionary of job status if the job state is running and the job has larger runtime
     if prev_job_state == "RUNNING" and cur_job_state == "RUNNING":
         return cur_runtime is not None and (prev_runtime is None or cur_runtime <= prev_runtime)
@@ -91,10 +125,25 @@ def skip_job_update(prev_job_state, cur_job_state, prev_runtime, cur_runtime):
 
 
 def format_partition_name(cluster_name, partition):
+    """
+    Formats a partition name by combining it with the cluster name.
+
+    :param cluster_name: Name of the cluster.
+    :param partition: Name of the partition.
+    :return: Formatted partition name as a string.
+    """
     return f"{cluster_name}_{partition}"
 
 
 def extract_job_info(detail, combined_id, job_status_dict):
+    """
+    Extracts and returns job information based on job details and existing job statuses.
+
+    :param detail: Dictionary containing details of the job.
+    :param combined_id: Combined id for the job.
+    :param job_status_dict: Dictionary of current job statuses.
+    :return: Dictionary with updated job state and runtime, or None if no update is needed.
+    """
     # Get the current job state and runtime
     cur_job_state = detail.get('job_state')
     raw_cur_runtime = detail.get('runtime')
@@ -113,6 +162,13 @@ def extract_job_info(detail, combined_id, job_status_dict):
 
 
 def update_node_list(detail, instance_ids):
+    """
+    Updates the list of nodes based on the provided details and existing instance IDs.
+
+    :param detail: Dictionary containing job or node details.
+    :param instance_ids: Set of existing instance IDs.
+    :return: A list of new nodes based on the provided details.
+    """
     node_list = detail.get("node_list", [])
     new_node_list = []
     for node in node_list:
@@ -124,6 +180,12 @@ def update_node_list(detail, instance_ids):
 
 
 def extract_data_from_response(response_body):
+    """
+    Extracts and returns job and node data from a response body.
+
+    :param response_body: The response body as a JSON string from which data is to be extracted.
+    :return: A list of extracted data from the response.
+    """
     logger.info("start extracting...")
     parsed_response = json.loads(response_body)
     hits = parsed_response.get('hits', {}).get('hits', [])
@@ -173,8 +235,13 @@ def extract_data_from_response(response_body):
     return extracted_data_list
 
 
-# In the stretch goal, the instance cost may be changed
 def get_instance_cost(instance_type):
+    """
+    Retrieves the cost associated with a specific instance type.
+
+    :param instance_type: The type of the instance.
+    :return: Cost of the instance as an integer or float.
+    """
     # Reference: https://aws.amazon.com/ec2/instance-types/t2/
     # In the real scenario, we may need to call an API
     costs = {
@@ -190,6 +257,12 @@ def get_instance_cost(instance_type):
 
 
 def get_total_cores(cpu_ids):
+    """
+    Calculates the total number of cores used based on CPU ID information.
+
+    :param cpu_ids: A list of CPU IDs.
+    :return: Total number of cores used as an integer.
+    """
     total_cores = 0
     for cpu_id in cpu_ids:
         if "-" in cpu_id:
@@ -202,10 +275,23 @@ def get_total_cores(cpu_ids):
 
 
 def is_job_relevant(job):
+    """
+    Determines if a job is relevant based on its state.
+
+    :param job: A dictionary representing a job.
+    :return: Boolean indicating whether the job state is either RUNNING or COMPLETED.
+    """
     return job.get("job_state") in ["RUNNING", "COMPLETED"]
 
 
 def get_cluster_nodes_detail(nodes_detail, current_cluster):
+    """
+    Retrieves node details for a specific cluster.
+
+    :param nodes_detail: A list of dictionaries containing nodes' details.
+    :param current_cluster: The name of the cluster for which to get node details.
+    :return: A list of node details for the specified cluster, or None if not found.
+    """
     for node_cluster in nodes_detail:
         if node_cluster["cluster_name"] == current_cluster:
             return node_cluster["detail"]["node_list"]
@@ -214,6 +300,7 @@ def get_cluster_nodes_detail(nodes_detail, current_cluster):
 
 
 def find_node_detail(cluster_nodes_detail, node_name):
+
     node_detail = next((node for node in cluster_nodes_detail if node["node_name"] == node_name), None)
     if not node_detail:
         logger.error(f"Could not find node details for node name: {node_name}")
@@ -221,11 +308,27 @@ def find_node_detail(cluster_nodes_detail, node_name):
 
 
 def calculate_cpu_usage_ratio(used_cores, node_detail):
+    """
+    Calculates the CPU usage ratio for a node.
+
+    :param used_cores: Number of used cores on the node.
+    :param node_detail: A dictionary containing details of the node.
+    :return: The CPU usage ratio as a float, or 0 if total VCPUs is zero.
+    """
     total_vcpus = node_detail["threads_per_core"] * node_detail["core_count"]
     return used_cores / total_vcpus if total_vcpus else 0
 
 
 def calculate_cost_for_node(node_name, cpu_ids, cluster_nodes_detail, job_runtime_minutes):
+    """
+    Calculates the cost for a node based on CPU usage and runtime.
+
+    :param node_name: The name of the node.
+    :param cpu_ids: List of CPU IDs used for the job.
+    :param cluster_nodes_detail: Details of nodes in the cluster.
+    :param job_runtime_minutes: The runtime of the job in minutes.
+    :return: The calculated cost for the node as a float.
+    """
     node_detail = find_node_detail(cluster_nodes_detail, node_name)
     if node_detail:
         used_cores = get_total_cores(cpu_ids)
@@ -236,11 +339,24 @@ def calculate_cost_for_node(node_name, cpu_ids, cluster_nodes_detail, job_runtim
 
 
 def calculate_cost_per_minute(node_detail):
+    """
+    Calculates the cost per minute for a node.
+
+    :param node_detail: A dictionary containing details of the node.
+    :return: The cost per minute as a float.
+    """
     cost_per_hour = get_instance_cost(node_detail["instance_type"])
     return cost_per_hour / 60
 
 
 def calculate_cost_for_job(job_data, nodes_detail):
+    """
+    Calculates the total cost for a job based on node usage and runtime.
+
+    :param job_data: A dictionary containing details of the job.
+    :param nodes_detail: Details of nodes in the cluster.
+    :return: The total cost for the job as a float.
+    """
     total_cost_for_job = 0
     job_runtime_minutes = parse_runtime_to_minutes(job_data["detail"]["run_time"])
     cluster_nodes_detail = get_cluster_nodes_detail(nodes_detail, job_data["cluster_name"])
@@ -254,6 +370,13 @@ def calculate_cost_for_job(job_data, nodes_detail):
 
 
 def calculate_cost(nodes_detail, jobs_detail):
+    """
+    Calculates costs for multiple jobs based on node details and job details.
+
+    :param nodes_detail: Details of nodes in the cluster.
+    :param jobs_detail: A list of dictionaries, each containing details of a job.
+    :return: A dictionary mapping job IDs to their calculated costs.
+    """
     logger.info("Enter into the cost calculation")
     total_costs = {}
     logger.info(f"Current nodes detail: {nodes_detail}")
@@ -264,6 +387,12 @@ def calculate_cost(nodes_detail, jobs_detail):
 
 
 def prepare_bulk_data(job_detail_with_cost):
+    """
+    Prepares data for bulk upload to OpenSearch.
+
+    :param job_detail_with_cost: A list of job details including their estimated costs.
+    :return: A string formatted for bulk upload to OpenSearch.
+    """
     bulk_data = ''
     for job in job_detail_with_cost:
         # Add timestamp to the index
@@ -283,10 +412,10 @@ def prepare_bulk_data(job_detail_with_cost):
 
 def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     """
-    Push or update calculated cost and related information for a specific job to OpenSearch
+    Post estimated cost and related information for a specific job to OpenSearch
     :param endpoint: OpenSearch endpoint
     :param job_detail_with_cost: A list containing job details and its estimated cost
-    :return:
+    :return: A dictionary with statusCode and response body.
     """
     username, password = get_username_and_password()
     # Remember to use bulk API
@@ -309,7 +438,6 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
         # Mark the documents as processed only if successfully added to OpenSearch
         mark_documents_as_processed(ENDPOINT, "scontrol-show-job-information")
         mark_documents_as_processed(ENDPOINT, "node-instance-mapping-event")
-        logger.info("Mark documents as processed")
 
         logger.info("Successfully added the estimated cost")
         return {
@@ -327,9 +455,9 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
 def mark_documents_as_processed(endpoint, event_type):
     """
     Marks the documents with the specified event-type as processed in OpenSearch.
-    :param endpoint:
-    :param event_type:
-    :return:
+    :param endpoint: OpenSearch endpoint
+    :param event_type: The event type of the documents to be marked as processed.
+    :return: A dictionary with statusCode and response body.
     """
     username, password = get_username_and_password()
     # sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
@@ -367,6 +495,12 @@ def mark_documents_as_processed(endpoint, event_type):
 
 
 def build_query_to_search(event_type):
+    """
+    Constructs a query for searching documents in OpenSearch based on the event type.
+
+    :param event_type: The type of event to match in the query.
+    :return: A dictionary representing the search query.
+    """
     return {
         "size": 5,
         "query": {
@@ -385,6 +519,11 @@ def build_query_to_search(event_type):
 
 
 def get_username_and_password():
+    """
+    Retrieves the username and password stored in AWS Secret Manager.
+
+    :return: A tuple containing the username and password.
+    """
     secret_name = os.environ["SECRET_NAME"]
     region_name = "us-east-2"
     s = boto3.session.Session()
@@ -403,6 +542,13 @@ def get_username_and_password():
 
 
 def search_data(endpoint, event_type):
+    """
+    Searches for data in OpenSearch indices based on the provided event type.
+
+    :param endpoint: The OpenSearch endpoint URL.
+    :param event_type: The event type to search for.
+    :return: A dictionary with statusCode and the search results or error message.
+    """
     username, password = get_username_and_password()
 
     # searching in OpenSearch for indices matching the pattern "cwl-*"

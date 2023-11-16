@@ -58,6 +58,14 @@ def lambda_handler(event, context):
 
 
 def get_secret():
+    """
+    Retrieves a secret from AWS Secrets Manager.
+
+    Fetches the secret using the secret name from the environment variable "SECRET_NAME".
+    The secret is expected to be in JSON string format and is parsed into a dictionary.
+
+    :return: A dictionary containing the secret data.
+    """
     secret_name = os.environ["SECRET_NAME"]
     region_name = "us-east-2"
     s = boto3.session.Session()
