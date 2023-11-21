@@ -1,20 +1,25 @@
-import os
+import sys
+import subprocess
+
+subprocess.call('pip install opensearch-py -t /tmp/ --no-cache-dir'.split(),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+sys.path.insert(1, '/tmp/')
+
 import json
 import logging
 import re
 from datetime import datetime
 
-import boto3
+import botocore.session
 import requests
-from requests.auth import HTTPBasicAuth
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 
 # Build a logger for debug
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
-ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
-# Original Endpoint
-# ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
+# This is the endpoint url for the manually created OpenSearch domain
+ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
 
 
 def lambda_handler(event, context):
@@ -372,7 +377,7 @@ def calculate_cost_for_node(matching_nodes, cpu_ids, job_runtime_minutes):
     """
     total_cost = 0
     for node_detail in matching_nodes:
-        if isinstance(node_detail, dict):
+        if isinstance(node_detail, dict)
             used_cores = get_total_cores(cpu_ids)
             cpu_usage_ratio = calculate_cpu_usage_ratio(used_cores, node_detail)
             cost_per_minute = calculate_cost_per_minute(node_detail)
@@ -449,10 +454,10 @@ def prepare_bulk_data(job_detail_with_cost):
     return bulk_data
 
 
-# def prepare_request(method, url, data, headers, sigv4):
-#     request = AWSRequest(method=method, url=url, data=data, headers=headers)
-#     sigv4.add_auth(request)
-#     return request.prepare()
+def prepare_request(method, url, data, headers, sigv4):
+    request = AWSRequest(method=method, url=url, data=data, headers=headers)
+    sigv4.add_auth(request)
+    return request.prepare()
 
 
 def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
@@ -462,9 +467,10 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
     :param job_detail_with_cost: A list containing job details and its estimated cost
     :return: A dictionary with statusCode and response body.
     """
-    username, password = get_username_and_password()
+    session = botocore.session.Session()
+    sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
     # Remember to use bulk API
-    path = "/jce-2023.11.13/_bulk/"
+    path = "/jce-2023.11.05/_bulk/"
     url = endpoint + path
 
     headers = {
@@ -473,16 +479,18 @@ def post_estimated_cost_to_opensearch(endpoint, job_detail_with_cost):
 
     # Preparing bulk data
     bulk_data = prepare_bulk_data(job_detail_with_cost)
+    prepped_request = prepare_request("POST", url, bulk_data, headers, sigv4)
 
     # Send the request
     try:
-        response = requests.post(url, auth=(username, password), headers=headers, data=bulk_data)
+        response = requests.post(url, headers=prepped_request.headers, data=prepped_request.body)
         logger.info(f"Received response: {response.status_code} {response.text}")
         response.raise_for_status()
 
         # Mark the documents as processed only if successfully added to OpenSearch
         mark_documents_as_processed(ENDPOINT, "scontrol-show-job-information")
         mark_documents_as_processed(ENDPOINT, "node-instance-mapping-event")
+        logger.info("Mark documents as processed")
 
         logger.info("Successfully added the estimated cost")
         return {
@@ -504,8 +512,8 @@ def mark_documents_as_processed(endpoint, event_type):
     :param event_type: The event type of the documents to be marked as processed.
     :return: A dictionary with statusCode and response body.
     """
-    username, password = get_username_and_password()
-    # sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
+    session = botocore.session.Session()
+    sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
     # Update by query to set processed=true for documents matching the event-type
     path = "/cwl-*/_update_by_query"
     url = endpoint + path
@@ -522,9 +530,11 @@ def mark_documents_as_processed(endpoint, event_type):
     }
     headers = {"Content-Type": "application/json"}
 
+    prepped_request = prepare_request("POST", url, json.dumps(query), headers, sigv4)
+
     # Send the request
     try:
-        response = requests.post(url, auth=HTTPBasicAuth(username, password), headers=headers, data=json.dumps(query))
+        response = requests.post(url, headers=prepped_request.headers, data=prepped_request.body)
         response.raise_for_status()
         logger.info("Documents marked as processed")
         return {
@@ -563,29 +573,6 @@ def build_query_to_search(event_type):
     }
 
 
-def get_username_and_password():
-    """
-    Retrieves the username and password stored in AWS Secret Manager.
-
-    :return: A tuple containing the username and password.
-    """
-    secret_name = os.environ["SECRET_NAME"]
-    region_name = "us-east-2"
-    s = boto3.session.Session()
-    client = s.client(
-        service_name='secretsmanager',
-        region_name=region_name
-    )
-
-    get_secret_value_response = client.get_secret_value(SecretId=secret_name)
-    secret = json.loads(get_secret_value_response['SecretString'])
-
-    username = list(secret.keys())[0]
-    password = secret[username]
-
-    return username, password
-
-
 def search_data(endpoint, event_type):
     """
     Searches for data in OpenSearch indices based on the provided event type.
@@ -594,17 +581,19 @@ def search_data(endpoint, event_type):
     :param event_type: The event type to search for.
     :return: A dictionary with statusCode and the search results or error message.
     """
-    username, password = get_username_and_password()
-
+    session = botocore.session.Session()
+    sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
     # searching in OpenSearch for indices matching the pattern "cwl-*"
     path = "/cwl-*/_search"
     url = endpoint + path
     query = build_query_to_search(event_type)
     headers = {"Content-Type": "application/json"}
 
+    prepped_request = prepare_request("GET", url, json.dumps(query), headers, sigv4)
+
     # Send the request and handle response
     try:
-        response = requests.get(url, auth=(username, password), headers=headers, json=query)
+        response = requests.get(url, headers=prepped_request.headers, data=prepped_request.body)
         response.raise_for_status()
         logger.info("Query succeeded")
         results = response.json()
