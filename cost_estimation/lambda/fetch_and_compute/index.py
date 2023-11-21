@@ -16,6 +16,20 @@ ENDPOINT = os.environ["OPENSEARCH_ENDPOINT"]
 # Original Endpoint
 # ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
 
+"""
+Lambda Function: Fetch and Compute with HTTP Basic Authentication (index.py)
+
+This file, named 'index.py', serves as the primary entry point for an AWS Lambda function 
+designed to fetch and compute data from OpenSearch. It focuses on calculating estimated 
+costs and parsing information relevant to job cost estimation. Although it shares most 
+of its core functionality with the SigV4 authentication version, this version utilizes 
+HTTP Basic Authentication for interacting with OpenSearch, making use of environment 
+variables for sensitive data like usernames, passwords, and the OpenSearch domain URL.
+
+The filename 'index.py' is chosen in alignment with AWS Lambda's conventions, where 'index' 
+indicates the main or starting file, and 'lambda_handler' within this file acts as the 
+function entry point when triggered by Lambda events.
+"""
 
 def lambda_handler(event, context):
     """
@@ -505,8 +519,6 @@ def mark_documents_as_processed(endpoint, event_type):
     :return: A dictionary with statusCode and response body.
     """
     username, password = get_username_and_password()
-    # sigv4 = SigV4Auth(session.get_credentials(), "es", "us-east-2")
-    # Update by query to set processed=true for documents matching the event-type
     path = "/cwl-*/_update_by_query"
     url = endpoint + path
     query = {

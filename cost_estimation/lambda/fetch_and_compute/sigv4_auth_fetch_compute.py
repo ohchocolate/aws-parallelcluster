@@ -21,6 +21,16 @@ logger.setLevel(logging.INFO)
 # This is the endpoint url for the manually created OpenSearch domain
 ENDPOINT = 'https://search-mylogs-kidfhbnbletp4ybierlou2llq4.us-east-2.es.amazonaws.com'
 
+"""
+Lambda Function: Fetch and Compute with SigV4 Authentication
+
+This file contains a complete Lambda function for fetching and computing data, 
+primarily focused on calculating estimated costs and parsing information from OpenSearch. 
+While the core functionality for data handling and computation remains largely 
+the same as in the basic authentication version, this version utilizes SigV4 
+authentication for secure interaction with OpenSearch. The OpenSearch domain URL 
+is hardcoded, and AWS SigV4 authentication is implemented for enhanced security.
+"""
 
 def lambda_handler(event, context):
     """
@@ -377,7 +387,7 @@ def calculate_cost_for_node(matching_nodes, cpu_ids, job_runtime_minutes):
     """
     total_cost = 0
     for node_detail in matching_nodes:
-        if isinstance(node_detail, dict)
+        if isinstance(node_detail, dict):
             used_cores = get_total_cores(cpu_ids)
             cpu_usage_ratio = calculate_cpu_usage_ratio(used_cores, node_detail)
             cost_per_minute = calculate_cost_per_minute(node_detail)
